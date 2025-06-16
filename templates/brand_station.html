@@ -412,6 +412,74 @@
             box-shadow: 0 0 20px rgba(0, 128, 255, 0.5);
         }
         
+        /* Image Results Section */
+        .image-results-section {
+            margin-top: 30px;
+            padding: 20px;
+            border: 2px solid #ff00ff;
+            border-radius: 10px;
+            background: linear-gradient(135deg, rgba(255, 0, 255, 0.1), rgba(138, 43, 226, 0.1));
+        }
+        
+        .glow-purple {
+            color: #ff00ff;
+            text-shadow: 0 0 10px rgba(255, 0, 255, 0.8);
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        
+        .image-concepts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .image-concept-card {
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid rgba(255, 0, 255, 0.3);
+            border-radius: 10px;
+            padding: 20px;
+            transition: all 0.3s ease;
+        }
+        
+        .image-concept-card:hover {
+            border-color: #ff00ff;
+            box-shadow: 0 0 20px rgba(255, 0, 255, 0.3);
+            transform: translateY(-2px);
+        }
+        
+        .concept-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .concept-title {
+            color: #ff00ff;
+            font-weight: bold;
+            font-size: 1.1rem;
+        }
+        
+        .concept-source {
+            background: linear-gradient(45deg, #ff00ff, #8b2be2);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+        }
+        
+        .concept-text {
+            color: #00ff41;
+            line-height: 1.6;
+            font-family: 'Fira Code', monospace;
+            background: rgba(0, 255, 65, 0.05);
+            padding: 15px;
+            border-radius: 5px;
+            border-left: 3px solid #00ff41;
+        }
+        
         /* Terminal-style loading */
         .terminal-loading {
             font-family: 'Fira Code', monospace;
@@ -621,6 +689,14 @@
                     <button id="export-pdf" class="btn btn-secondary">📑 Export PDF</button>
                     <button id="export-html" class="btn btn-secondary">🌐 Export HTML</button>
                     <button id="generate-images" class="btn">🎨 Generate Images</button>
+                </div>
+                
+                <!-- Image Generation Results Section -->
+                <div id="image-results-section" class="image-results-section hidden">
+                    <h3 class="glow-purple">🎭 PENTAGRAM PROMPT GENERATION</h3>
+                    <div id="image-concepts-grid" class="image-concepts-grid">
+                        <!-- Generated image concepts will appear here -->
+                    </div>
                 </div>
             </div>
         </div>
@@ -899,6 +975,12 @@
             }
             
             try {
+                // Update button state
+                const btn = document.getElementById('generate-images');
+                const originalText = btn.textContent;
+                btn.textContent = '🔄 GENERATING...';
+                btn.disabled = true;
+                
                 const response = await fetch('/api/generate-images', {
                     method: 'POST',
                     headers: {
@@ -911,14 +993,62 @@
                 });
                 
                 const data = await response.json();
-                if (data.status === 'generating') {
-                    alert('🎨 Image generation started! Check Image Agent status.');
+                
+                if (data.status === 'complete' && data.images) {
+                    displayImageConcepts(data.images);
+                    
+                    // Reset button
+                    btn.textContent = '✅ CONCEPTS GENERATED';
+                    btn.disabled = false;
+                    
+                    // Revert button after 2 seconds
+                    setTimeout(() => {
+                        btn.textContent = originalText;
+                    }, 2000);
+                } else {
+                    throw new Error(data.error || 'Image generation failed');
                 }
                 
             } catch (error) {
                 console.error('Image generation failed:', error);
                 alert('Image generation failed: ' + error.message);
+                
+                // Reset button
+                const btn = document.getElementById('generate-images');
+                btn.textContent = '🎨 Generate Images';
+                btn.disabled = false;
             }
+        }
+        
+        // Display generated image concepts
+        function displayImageConcepts(images) {
+            const resultsSection = document.getElementById('image-results-section');
+            const conceptsGrid = document.getElementById('image-concepts-grid');
+            
+            // Clear previous results
+            conceptsGrid.innerHTML = '';
+            
+            // Show results section
+            resultsSection.classList.remove('hidden');
+            
+            // Add each image concept
+            images.forEach((image, index) => {
+                const conceptCard = document.createElement('div');
+                conceptCard.className = 'image-concept-card';
+                
+                conceptCard.innerHTML = `
+                    <div class="concept-header">
+                        <div class="concept-title">🎭 AI Concept ${index + 1}</div>
+                        <div class="concept-source">${image.source || 'GPT-4o'}</div>
+                    </div>
+                    <div class="concept-text">${image.concept}</div>
+                `;
+                
+                conceptsGrid.appendChild(conceptCard);
+            });
+            
+            // Scroll to results
+            resultsSection.scrollIntoView({ behavior: 'smooth' });
         }
     </script>
 </body>

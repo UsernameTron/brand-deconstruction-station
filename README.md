@@ -237,3 +237,62 @@ python3 run.py
 cd desktop-launcher && ./launch-desktop.sh
 # Native desktop window
 ```
+
+## 🖥️ Desktop Application
+
+### Quick Install (macOS)
+
+The Brand Deconstruction Station is available as a native macOS desktop application:
+
+```bash
+# Clone and build
+git clone https://github.com/UsernameTron/brand-deconstruction-station.git
+cd brand-deconstruction-station
+./build-and-install.sh
+```
+
+### Manual Installation
+
+1. **Build the app:**
+```bash
+cd desktop-launcher
+npm install
+npm run build:mac
+```
+
+2. **Install to Applications:**
+```bash
+cp -r "dist/mac-arm64/Brand Deconstruction Station.app" /Applications/
+```
+
+3. **Create desktop shortcut:**
+```bash
+ln -sf "/Applications/Brand Deconstruction Station.app" ~/Desktop/
+```
+
+### Launch Options
+
+Once installed, you can launch the Brand Deconstruction Station:
+
+- 🖱️ **Double-click** the desktop icon
+- 📁 **Applications folder** → Brand Deconstruction Station
+- 🔍 **Spotlight search** → "Brand Deconstruction"
+- 🚀 **Dock** → Drag from Applications to add
+
+### Features
+
+The desktop app provides:
+- ✅ **Native macOS experience** with proper window management
+- ✅ **Auto-starting Flask backend** (no manual server setup)
+- ✅ **Standalone operation** (no terminal required)
+- ✅ **Full cyberpunk interface** in a native window
+- ✅ **Menu bar integration** with standard macOS controls
+
+### Architecture Support
+
+- **Apple Silicon (M1/M2/M3)**: `Brand Deconstruction Station-1.0.0-arm64.dmg`
+- **Intel Macs**: `Brand Deconstruction Station-1.0.0.dmg`
+
+The build process automatically creates both versions.
+
+---
