@@ -19,14 +19,6 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 import io
 
-# Add OpenAI import
-try:
-    import openai
-    openai_available = True
-except ImportError:
-    openai_available = False
-    print("⚠️  OpenAI not installed. Using fallback mode.")
-
 app = Flask(__name__)
 
 # Global state for agent simulation
@@ -48,17 +40,18 @@ class BrandAnalysisEngine:
         self.mock_mode = not self.openai_api_key
         
         # Initialize OpenAI client if available
-        if self.openai_api_key and openai_available:
+        self.openai_client = None
+        if self.openai_api_key:
             try:
-                openai.api_key = self.openai_api_key
-                self.client = openai
-                print("✅ OpenAI client initialized for image generation")
+                import openai
+                self.openai_client = openai.OpenAI(api_key=self.openai_api_key)
+                print("✅ OpenAI client initialized for GPT-4o image concepts")
+            except ImportError:
+                print("⚠️  OpenAI package not available, using enhanced mock mode")
             except Exception as e:
-                print(f"⚠️  OpenAI initialization failed: {e}")
-                self.client = None
-                self.mock_mode = True
+                print(f"⚠️  OpenAI client initialization failed: {e}")
         else:
-            self.client = None
+            print("⚠️  OpenAI API key not found, using mock mode")
         
     def scrape_website(self, url):
         """Scrape basic website content for analysis"""
@@ -166,31 +159,26 @@ class BrandAnalysisEngine:
         """Generate satirical brand image concepts using GPT-4o"""
         try:
             # Get brand analysis data
-            website_data = analysis_data.get('website_data', {})
-            website_url = website_data.get('url', 'unknown brand')
-            vulnerabilities = analysis_data.get('vulnerabilities', [])
+            website_url = analysis_data.get('website_data', {}).get('url', 'unknown brand')
+            vulnerabilities = [v.get('name', '') for v in analysis_data.get('vulnerabilities', [])]
             satirical_angles = analysis_data.get('satirical_angles', [])
             
             images = []
             for i in range(count):
                 # Create GPT-4o prompt for satirical image concept
-                vuln_list = [v.get('name', str(v)) if isinstance(v, dict) else str(v) for v in vulnerabilities[:3]]
-                angle_list = [str(a) for a in satirical_angles[:3]]
-                
                 prompt = f"""Create a detailed, satirical image concept for {website_url}.
 
-Brand Vulnerabilities: {', '.join(vuln_list)}
-Satirical Angles: {', '.join(angle_list)}
+Brand Vulnerabilities: {', '.join(vulnerabilities[:3])}
+Satirical Angles: {', '.join(satirical_angles[:3])}
 
 Generate a witty, satirical image description that exposes corporate hypocrisy. Be creative and humorous but not offensive. Format as a detailed visual description suitable for image generation.
 
 Respond with just the image description, no extra text."""
 
                 try:
-                    # Use GPT-4o to generate satirical image concept if OpenAI client available
-                    if hasattr(self, 'client') and self.client and not self.mock_mode:
-                        import openai
-                        response = openai.chat.completions.create(
+                    if self.openai_client:
+                        # Use GPT-4o to generate satirical image concept
+                        response = self.openai_client.chat.completions.create(
                             model="gpt-4o",
                             messages=[{"role": "user", "content": prompt}],
                             max_tokens=200,
@@ -199,22 +187,19 @@ Respond with just the image description, no extra text."""
                         
                         image_concept = response.choices[0].message.content.strip()
                         source = 'gpt-4o'
-                        
                     else:
-                        # Enhanced fallback concept
-                        image_concept = f"Satirical corporate imagery exposing {website_url}: A clever visual metaphor highlighting {vuln_list[0] if vuln_list else 'corporate contradictions'} through ironic juxtaposition of polished branding with operational reality"
-                        source = 'enhanced-fallback'
+                        raise Exception("OpenAI client not available")
                         
                 except Exception as e:
                     print(f"GPT-4o image generation failed: {e}")
                     # Fallback to enhanced mock concept
-                    image_concept = f"Satirical corporate imagery exposing {website_url}: A clever visual metaphor highlighting {vuln_list[0] if vuln_list else 'corporate contradictions'}"
+                    image_concept = f"Satirical corporate imagery exposing {website_url}: A clever visual metaphor highlighting {vulnerabilities[0] if vulnerabilities else 'corporate contradictions'}"
                     source = 'fallback'
                 
                 images.append({
                     'id': f'img_{i+1}_{int(time.time())}',
                     'concept': image_concept,
-                    'prompt': f'Satirical image for {website_url}',
+                    'prompt': prompt,
                     'status': 'concept_generated',
                     'timestamp': datetime.now().isoformat(),
                     'source': source
@@ -229,7 +214,7 @@ Respond with just the image description, no extra text."""
             for i in range(count):
                 images.append({
                     'id': f'img_{i+1}_{int(time.time())}',
-                    'concept': f'Satirical corporate imagery for {analysis_data.get("website_data", {}).get("url", "brand")}',
+                    'concept': f'Satirical corporate imagery for {website_url}',
                     'prompt': f'Mock satirical image concept',
                     'status': 'fallback_generated',
                     'timestamp': datetime.now().isoformat()
@@ -243,6 +228,23 @@ brand_engine = BrandAnalysisEngine()
 def index():
     """Main application interface"""
     return render_template('brand_station.html')
+
+@app.route('/favicon.ico')
+def favicon():
+    """Serve cyberpunk-themed favicon"""
+    # Create a simple SVG favicon with cyberpunk theme
+    favicon_svg = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+        <rect fill="#000011" width="32" height="32"/>
+        <circle cx="16" cy="16" r="12" fill="none" stroke="#00ff41" stroke-width="2"/>
+        <text x="16" y="20" text-anchor="middle" fill="#00ff41" font-family="monospace" font-size="14" font-weight="bold">🎭</text>
+        <rect x="4" y="4" width="24" height="2" fill="#00ff41" opacity="0.7"/>
+        <rect x="4" y="26" width="24" height="2" fill="#00ff41" opacity="0.7"/>
+    </svg>'''
+    
+    from flask import Response
+    response = Response(favicon_svg, mimetype='image/svg+xml')
+    response.headers['Cache-Control'] = 'public, max-age=86400'  # Cache for 1 day
+    return response
 
 @app.route('/api/analyze', methods=['POST'])
 def analyze_brand():
@@ -344,22 +346,24 @@ def generate_images():
     analysis_id = data.get('analysis_id', 'current')
     count = data.get('count', 1)
     
-    # Use current analysis data if available
+    # Use current analysis if 'current' is specified
     if analysis_id == 'current' and current_analysis_id:
         analysis_id = current_analysis_id
     
     if analysis_id not in analysis_results:
-        return jsonify({'error': 'Analysis not found'}), 404
+        return jsonify({'error': 'Analysis not found. Please run analysis first.'}), 404
     
     analysis_data = analysis_results[analysis_id]
     
-    # Generate image concepts directly (no async needed for concepts)
     try:
+        # Generate images using GPT-4o
         agent_states['image']['active'] = True
         agent_states['image']['status'] = 'Generating concepts...'
         agent_states['image']['progress'] = 50
         
         images = brand_engine.generate_satirical_images(analysis_data, count)
+        
+        # Store in analysis results
         analysis_results[analysis_id]['generated_images'] = images
         
         agent_states['image']['status'] = 'Complete'
@@ -368,8 +372,8 @@ def generate_images():
         
         return jsonify({
             'status': 'complete',
-            'count': len(images),
-            'images': images
+            'images': images,
+            'count': len(images)
         })
         
     except Exception as e:
@@ -526,7 +530,7 @@ def health_check():
 
 if __name__ == '__main__':
     print("🎭 Brand Deconstruction Station Starting...")
-    print("📡 Server: http://localhost:3001")
+    print("📡 Server: http://localhost:3000")
     print("🤖 AI Agents: Initialized")
     print("🎮 Interface: Cyberpunk Terminal")
     
@@ -539,4 +543,4 @@ if __name__ == '__main__':
     print("🚀 Ready for brand deconstruction!")
     print("="*50 + "\n")
     
-    app.run(host='0.0.0.0', port=3001, debug=True, threaded=True)
+    app.run(host='0.0.0.0', port=3002, debug=True, threaded=True)
