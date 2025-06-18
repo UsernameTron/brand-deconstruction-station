@@ -1,0 +1,84 @@
+{
+  "name": "brand-deconstruction-station",
+  "productName": "Brand Deconstruction Station",
+  "version": "1.0.0",
+  "description": "🎭 Cyberpunk AI-powered brand vulnerability analysis with satirical insights",
+  "main": "main.js",
+  "author": "CPConnor",
+  "license": "MIT",
+  "homepage": "https://github.com/cpconnor/brand-deconstruction-station",
+  "scripts": {
+    "start": "electron .",
+    "dev": "NODE_ENV=development electron .",
+    "build": "electron-builder",
+    "build:mac": "electron-builder --mac",
+    "build:win": "electron-builder --win",
+    "build:linux": "electron-builder --linux",
+    "dist": "npm run build",
+    "pack": "electron-builder --dir",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "build": {
+    "appId": "com.cpconnor.brand-deconstruction-station",
+    "productName": "Brand Deconstruction Station",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "assets/**/*",
+      "../app.py",
+      "../templates/**/*",
+      "../static/**/*",
+      "../requirements.txt",
+      "../start.sh"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "assets/icon.icns",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        }
+      ]
+    },
+    "win": {
+      "icon": "assets/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "linux": {
+      "icon": "assets/icon.png",
+      "category": "Development",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "keywords": [
+    "brand",
+    "analysis",
+    "ai",
+    "cyberpunk",
+    "satirical",
+    "corporate",
+    "vulnerability",
+    "desktop"
+  ]
+}
