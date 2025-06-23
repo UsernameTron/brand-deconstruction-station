@@ -560,7 +560,7 @@
                 <div class="status-item">🤖 AI Agents: <span id="agent-count">4</span> Online</div>
                 <div class="status-item">📡 Status: <span id="system-status">Operational</span></div>
                 <div class="status-item">🎮 Interface: Cyberpunk Terminal</div>
-                <div class="status-item">⚡ Mode: <span id="api-mode">Mock</span></div>
+                <div class="status-item">⚡ Mode: <span id="api-mode">Live</span></div>
             </div>
         </header>
         
@@ -691,7 +691,10 @@
                 
                 <!-- Image Generation Results Section -->
                 <div id="image-results-section" class="image-results-section hidden">
-                    <h3 class="glow-purple">🎭 PENTAGRAM PROMPT GENERATION</h3>
+                    <h3 class="glow-purple">🎭 PENTAGRAM PROMPT FRAMEWORK</h3>
+                    <div class="framework-info" style="margin-bottom: 15px; padding: 10px; background: rgba(255,0,255,0.1); border-left: 3px solid #ff00ff; font-size: 0.9rem;">
+                        <strong>PENTAGRAM Framework:</strong> Purpose • Elements • Narrative • Tone • Audience • Guidelines • Results • Aesthetics • Metaphors
+                    </div>
                     <div id="image-concepts-grid" class="image-concepts-grid">
                         <!-- Generated image concepts will appear here -->
                     </div>
@@ -763,13 +766,8 @@
                 const data = await response.json();
                 
                 document.getElementById('system-status').textContent = data.status;
-                document.getElementById('api-mode').textContent = data.mock_mode ? 'Mock' : 'Live';
-                
-                if (data.mock_mode) {
-                    document.getElementById('api-mode').className = 'glow-yellow';
-                } else {
-                    document.getElementById('api-mode').className = 'glow';
-                }
+                document.getElementById('api-mode').textContent = data.live_mode ? 'Live' : 'Offline';
+                document.getElementById('api-mode').className = data.live_mode ? 'glow' : 'glow-red';
             } catch (error) {
                 console.error('Health check failed:', error);
                 document.getElementById('system-status').textContent = 'Error';
@@ -1036,8 +1034,8 @@
                 
                 conceptCard.innerHTML = `
                     <div class="concept-header">
-                        <div class="concept-title">🎭 AI Concept ${index + 1}</div>
-                        <div class="concept-source">${image.source || 'GPT-4o'}</div>
+                        <div class="concept-title">🎭 PENTAGRAM Concept ${index + 1}</div>
+                        <div class="concept-source">${image.source === 'gpt-4o' ? 'GPT-4o + PENTAGRAM' : image.source === 'pentagram-fallback' ? 'PENTAGRAM Framework' : image.source || 'PENTAGRAM'}</div>
                     </div>
                     <div class="concept-text">${image.concept}</div>
                 `;

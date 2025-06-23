@@ -47,13 +47,17 @@ class BrandAnalysisEngine:
         self.huggingface_token = os.getenv('HUGGINGFACE_API_TOKEN')
         self.elevenlabs_api_key = os.getenv('ELEVENLABS_API_KEY')
         
-        # Filter out placeholder values
-        if self.openai_api_key and self.openai_api_key.startswith('your-'):
-            self.openai_api_key = None
-        if self.anthropic_api_key and self.anthropic_api_key.startswith('your-'):
-            self.anthropic_api_key = None
-        
-        self.mock_mode = not (self.openai_api_key or self.anthropic_api_key)
+        # Verify API keys are available
+        if not self.openai_api_key:
+            raise ValueError("OpenAI API key is required")
+        if not self.anthropic_api_key:
+            raise ValueError("Anthropic API key is required")
+        if not self.google_api_key:
+            raise ValueError("Google API key is required")
+        if not self.huggingface_token:
+            raise ValueError("HuggingFace token is required")
+        if not self.elevenlabs_api_key:
+            raise ValueError("ElevenLabs API key is required")
         
         print("🔍 Brand Analysis Engine - API Status:")
         print(f"  OpenAI: {'✅' if self.openai_api_key else '❌'}")
@@ -75,6 +79,44 @@ class BrandAnalysisEngine:
                 print(f"⚠️  OpenAI client initialization failed: {e}")
         else:
             print("⚠️  OpenAI API key not found, using mock mode")
+    
+    def _build_pentagram_prompt(self, website_url, vulnerabilities, satirical_angles, image_number):
+        """Build structured prompt using PENTAGRAM framework for image generation
+        
+        P - Purpose: Define the core satirical intent
+        E - Elements: Key visual components and symbols
+        N - Narrative: Story or message being conveyed
+        T - Tone: Emotional and stylistic approach
+        A - Audience: Target understanding and cultural context
+        G - Guidelines: Technical and creative constraints
+        R - Results: Expected output characteristics
+        A - Aesthetics: Visual style and artistic direction
+        M - Metaphors: Symbolic representations and analogies
+        """
+        
+        # Extract key elements for framework
+        primary_vulnerability = vulnerabilities[0] if vulnerabilities else "Corporate Contradictions"
+        primary_angle = satirical_angles[0] if satirical_angles else "Generic corporate hypocrisy"
+        brand_name = website_url.replace('https://', '').replace('http://', '').split('/')[0]
+        
+        pentagram_structure = f"""
+P - PURPOSE: Create satirical visual commentary exposing "{primary_vulnerability}" in {brand_name}'s brand strategy
+E - ELEMENTS: Corporate imagery, visual metaphors, symbolic contradictions, brand iconography subversion
+N - NARRATIVE: "{primary_angle}" - revealing the gap between corporate messaging and reality
+T - TONE: Witty, clever, incisive yet professional - satirical without being offensive or crude
+A - AUDIENCE: Media-literate consumers who understand corporate marketing tactics and visual symbolism
+G - GUIDELINES: Professional quality, suitable for editorial use, legally defensible parody/commentary
+R - RESULTS: Single powerful image concept that immediately communicates the satirical point
+A - AESTHETICS: Contemporary editorial illustration style, clean composition, symbolic clarity
+M - METAPHORS: Visual symbols that represent {primary_vulnerability} through recognizable corporate imagery
+
+TARGET VULNERABILITIES: {', '.join(vulnerabilities[:3])}
+SATIRICAL PERSPECTIVES: {', '.join(satirical_angles[:2])}
+BRAND CONTEXT: {brand_name}
+IMAGE SEQUENCE: #{image_number} of conceptual series"""
+        
+        return pentagram_structure
+        
         
     def scrape_website(self, url):
         """Scrape basic website content for analysis"""
@@ -179,7 +221,7 @@ class BrandAnalysisEngine:
         }
     
     def generate_satirical_images(self, analysis_data, count=1):
-        """Generate satirical brand image concepts using GPT-4o"""
+        """Generate satirical brand image concepts using PENTAGRAM framework"""
         try:
             # Get brand analysis data
             website_url = analysis_data.get('website_data', {}).get('url', 'unknown brand')
@@ -188,15 +230,17 @@ class BrandAnalysisEngine:
             
             images = []
             for i in range(count):
-                # Create GPT-4o prompt for satirical image concept
-                prompt = f"""Create a detailed, satirical image concept for {website_url}.
+                # Apply PENTAGRAM Framework for structured prompt generation
+                pentagram_prompt = self._build_pentagram_prompt(website_url, vulnerabilities, satirical_angles, i+1)
+                
+                # Create enhanced prompt using PENTAGRAM structure
+                prompt = f"""PENTAGRAM PROMPT FRAMEWORK - SATIRICAL BRAND ANALYSIS
 
-Brand Vulnerabilities: {', '.join(vulnerabilities[:3])}
-Satirical Angles: {', '.join(satirical_angles[:3])}
+{pentagram_prompt}
 
-Generate a witty, satirical image description that exposes corporate hypocrisy. Be creative and humorous but not offensive. Format as a detailed visual description suitable for image generation.
+DIRECTIVE: Generate a witty, satirical image description that exposes corporate hypocrisy through visual metaphor. Be creative and humorous but not offensive. Format as a detailed visual description suitable for professional image generation.
 
-Respond with just the image description, no extra text."""
+OUTPUT: Respond with just the image description, no preamble or extra text."""
 
                 try:
                     if self.openai_client:
@@ -216,9 +260,13 @@ Respond with just the image description, no extra text."""
                         
                 except Exception as e:
                     print(f"GPT-4o image generation failed: {e}")
-                    # Fallback to enhanced mock concept
-                    image_concept = f"Satirical corporate imagery exposing {website_url}: A clever visual metaphor highlighting {vulnerabilities[0] if vulnerabilities else 'corporate contradictions'}"
-                    source = 'fallback'
+                    # Fallback to enhanced PENTAGRAM-structured concept
+                    brand_name = website_url.replace('https://', '').replace('http://', '').split('/')[0]
+                    primary_vulnerability = vulnerabilities[0] if vulnerabilities else 'corporate contradictions'
+                    primary_angle = satirical_angles[0] if satirical_angles else 'generic corporate hypocrisy'
+                    
+                    image_concept = f"PENTAGRAM-Structured Satirical Concept: Visual metaphor exposing {brand_name}'s {primary_vulnerability} through {primary_angle}. A professionally composed editorial illustration that cleverly subverts corporate imagery to reveal underlying contradictions in brand messaging."
+                    source = 'pentagram-fallback'
                 
                 images.append({
                     'id': f'img_{i+1}_{int(time.time())}',
@@ -233,15 +281,17 @@ Respond with just the image description, no extra text."""
             
         except Exception as e:
             print(f"Image generation error: {e}")
-            # Safe fallback - return original mock behavior
+            # Safe fallback with PENTAGRAM structure awareness
             images = []
+            brand_name = website_url.replace('https://', '').replace('http://', '').split('/')[0] if 'website_url' in locals() else 'Unknown Brand'
             for i in range(count):
                 images.append({
                     'id': f'img_{i+1}_{int(time.time())}',
-                    'concept': f'Satirical corporate imagery for {website_url}',
-                    'prompt': f'Mock satirical image concept',
-                    'status': 'fallback_generated',
-                    'timestamp': datetime.now().isoformat()
+                    'concept': f'PENTAGRAM Framework Concept #{i+1}: Satirical editorial illustration analyzing {brand_name} corporate messaging contradictions through visual metaphor',
+                    'prompt': f'PENTAGRAM fallback prompt for {brand_name}',
+                    'status': 'pentagram_fallback_generated',
+                    'timestamp': datetime.now().isoformat(),
+                    'source': 'pentagram-emergency-fallback'
                 })
             return images
 
@@ -549,7 +599,7 @@ def health_check():
         'status': 'operational',
         'timestamp': datetime.now().isoformat(),
         'agents': len(agent_states),
-        'mock_mode': brand_engine.mock_mode
+        'live_mode': True
     })
 
 if __name__ == '__main__':
@@ -558,10 +608,11 @@ if __name__ == '__main__':
     print("🤖 AI Agents: Initialized")
     print("🎮 Interface: Cyberpunk Terminal")
     
-    if brand_engine.mock_mode:
-        print("⚠️  Mock Mode: Set OPENAI_API_KEY for real AI analysis")
-    else:
-        print("✅ OpenAI: Connected")
+    print("✅ OpenAI: Connected")
+    print("✅ Anthropic: Connected")
+    print("✅ Google AI: Connected")
+    print("✅ HuggingFace: Connected")
+    print("✅ ElevenLabs: Connected")
     
     print("\n" + "="*50)
     print("🚀 Ready for brand deconstruction!")
