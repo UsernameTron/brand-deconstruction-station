@@ -40,24 +40,17 @@ class BrandAnalysisEngine:
     """AI-powered brand analysis engine with multi-agent coordination"""
     
     def __init__(self):
-        # Load all available API keys
+        # Prioritize OpenAI API - only requirement
         self.openai_api_key = os.getenv('OPENAI_API_KEY')
         self.anthropic_api_key = os.getenv('ANTHROPIC_API_KEY')
         self.google_api_key = os.getenv('GOOGLE_API_KEY')
         self.huggingface_token = os.getenv('HUGGINGFACE_API_TOKEN')
         self.elevenlabs_api_key = os.getenv('ELEVENLABS_API_KEY')
         
-        # Verify API keys are available
+        # OpenAI is the primary requirement
         if not self.openai_api_key:
-            raise ValueError("OpenAI API key is required")
-        if not self.anthropic_api_key:
-            raise ValueError("Anthropic API key is required")
-        if not self.google_api_key:
-            raise ValueError("Google API key is required")
-        if not self.huggingface_token:
-            raise ValueError("HuggingFace token is required")
-        if not self.elevenlabs_api_key:
-            raise ValueError("ElevenLabs API key is required")
+            print("⚠️  Warning: OpenAI API key not found. Using enhanced mock mode.")
+            print("   For real AI analysis, set OPENAI_API_KEY environment variable.")
         
         print("🔍 Brand Analysis Engine - API Status:")
         print(f"  OpenAI: {'✅' if self.openai_api_key else '❌'}")
@@ -66,19 +59,22 @@ class BrandAnalysisEngine:
         print(f"  Hugging Face: {'✅' if self.huggingface_token else '❌'}")
         print(f"  ElevenLabs: {'✅' if self.elevenlabs_api_key else '❌'}")
         
-        # Initialize OpenAI client if available
+        # Initialize OpenAI client - primary AI engine
         self.openai_client = None
+        self.ai_mode = 'mock'
+        
         if self.openai_api_key:
             try:
                 import openai
                 self.openai_client = openai.OpenAI(api_key=self.openai_api_key)
-                print("✅ OpenAI client initialized for GPT-4o image concepts")
+                self.ai_mode = 'openai'
+                print("✅ OpenAI client initialized - Real AI analysis enabled")
             except ImportError:
                 print("⚠️  OpenAI package not available, using enhanced mock mode")
             except Exception as e:
                 print(f"⚠️  OpenAI client initialization failed: {e}")
         else:
-            print("⚠️  OpenAI API key not found, using mock mode")
+            print("⚠️  Running in mock mode - set OpenAI API key for real analysis")
     
     def _build_pentagram_prompt(self, website_url, vulnerabilities, satirical_angles, image_number):
         """Build structured prompt using PENTAGRAM framework for image generation
@@ -148,9 +144,105 @@ IMAGE SEQUENCE: #{image_number} of conceptual series"""
             }
     
     def analyze_brand_vulnerabilities(self, website_data, analysis_type='deep'):
-        """Generate brand vulnerability analysis with satirical insights"""
+        """Generate brand vulnerability analysis with satirical insights using OpenAI or fallback"""
         
-        # Mock satirical vulnerabilities based on common corporate patterns
+        # Determine analysis parameters
+        if analysis_type == 'quick':
+            num_vulnerabilities = 3
+            num_angles = 3
+        elif analysis_type == 'deep':
+            num_vulnerabilities = 5
+            num_angles = 5
+        else:  # mega
+            num_vulnerabilities = 8
+            num_angles = 8
+        
+        # Use OpenAI for real analysis if available
+        if self.ai_mode == 'openai' and self.openai_client:
+            return self._analyze_with_openai(website_data, analysis_type, num_vulnerabilities, num_angles)
+        else:
+            return self._analyze_with_fallback(website_data, analysis_type, num_vulnerabilities, num_angles)
+    
+    def _analyze_with_openai(self, website_data, analysis_type, num_vulnerabilities, num_angles):
+        """Real AI analysis using OpenAI GPT-4"""
+        try:
+            url = website_data.get('url', 'unknown website')
+            title = website_data.get('title', 'unknown brand')
+            
+            # Create comprehensive analysis prompt
+            prompt = f"""Analyze this brand for satirical vulnerabilities and corporate contradictions:
+
+Website: {url}
+Title: {title}
+Analysis Depth: {analysis_type}
+
+Generate {num_vulnerabilities} brand vulnerabilities and {num_angles} satirical attack angles.
+
+For each vulnerability, provide:
+1. Name (concise category)
+2. Score (0-10, where 10 = most vulnerable)
+3. Description (brief analysis)
+
+For satirical angles, provide witty one-liners that expose corporate hypocrisy.
+
+Return as JSON:
+{{
+    "vulnerabilities": [
+        {{"name": "Category", "score": 8.5, "description": "Analysis here"}},
+        ...
+    ],
+    "satirical_angles": [
+        "Witty satirical angle 1",
+        ...
+    ]
+}}
+
+Be clever, satirical, and professionally critical without being offensive."""
+
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=800,
+                temperature=0.8
+            )
+            
+            # Parse OpenAI response
+            content = response.choices[0].message.content
+            
+            # Extract JSON from response
+            try:
+                import re
+                json_match = re.search(r'\{[\s\S]*\}', content)
+                if json_match:
+                    ai_analysis = json.loads(json_match.group())
+                    vulnerabilities = ai_analysis.get('vulnerabilities', [])
+                    satirical_angles = ai_analysis.get('satirical_angles', [])
+                else:
+                    raise ValueError("No valid JSON found in response")
+            except:
+                # Fallback parsing if JSON fails
+                return self._analyze_with_fallback(website_data, analysis_type, num_vulnerabilities, num_angles)
+            
+            # Calculate overall score
+            avg_score = sum(v.get('score', 5.0) for v in vulnerabilities) / len(vulnerabilities) if vulnerabilities else 7.5
+            
+            return {
+                'vulnerability_score': round(avg_score, 1),
+                'vulnerabilities': vulnerabilities[:num_vulnerabilities],
+                'satirical_angles': satirical_angles[:num_angles],
+                'analysis_type': analysis_type,
+                'ai_mode': 'openai',
+                'timestamp': datetime.now().isoformat(),
+                'website_data': website_data
+            }
+            
+        except Exception as e:
+            print(f"OpenAI analysis failed: {e}")
+            return self._analyze_with_fallback(website_data, analysis_type, num_vulnerabilities, num_angles)
+    
+    def _analyze_with_fallback(self, website_data, analysis_type, num_vulnerabilities, num_angles):
+        """Fallback analysis with enhanced templates"""
+        
         vulnerability_templates = [
             {
                 'categories': ['Premium Pricing', 'Artificial Scarcity', 'Feature Removal'],
@@ -177,17 +269,6 @@ IMAGE SEQUENCE: #{image_number} of conceptual series"""
                 ]
             }
         ]
-        
-        # Generate analysis based on type
-        if analysis_type == 'quick':
-            num_vulnerabilities = 3
-            num_angles = 3
-        elif analysis_type == 'deep':
-            num_vulnerabilities = 5
-            num_angles = 5
-        else:  # mega
-            num_vulnerabilities = 8
-            num_angles = 8
         
         # Generate vulnerabilities
         vulnerabilities = []
@@ -216,6 +297,7 @@ IMAGE SEQUENCE: #{image_number} of conceptual series"""
             'vulnerabilities': vulnerabilities,
             'satirical_angles': satirical_angles,
             'analysis_type': analysis_type,
+            'ai_mode': 'fallback',
             'timestamp': datetime.now().isoformat(),
             'website_data': website_data
         }
@@ -599,7 +681,9 @@ def health_check():
         'status': 'operational',
         'timestamp': datetime.now().isoformat(),
         'agents': len(agent_states),
-        'live_mode': True
+        'ai_mode': brand_engine.ai_mode,
+        'openai_available': brand_engine.openai_client is not None,
+        'live_mode': brand_engine.ai_mode == 'openai'
     })
 
 if __name__ == '__main__':
@@ -608,12 +692,7 @@ if __name__ == '__main__':
     print("🤖 AI Agents: Initialized")
     print("🎮 Interface: Cyberpunk Terminal")
     
-    print("✅ OpenAI: Connected")
-    print("✅ Anthropic: Connected")
-    print("✅ Google AI: Connected")
-    print("✅ HuggingFace: Connected")
-    print("✅ ElevenLabs: Connected")
-    
+    # Status will be shown by BrandAnalysisEngine initialization
     print("\n" + "="*50)
     print("🚀 Ready for brand deconstruction!")
     print("="*50 + "\n")
