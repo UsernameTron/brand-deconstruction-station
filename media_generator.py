@@ -92,6 +92,12 @@ class GoogleMediaGenerator:
         # Job tracking
         self.active_jobs: Dict[str, MediaGenerationJob] = {}
 
+        # Veo video operation tracking {job_id: operation_name}
+        self.veo_operations: Dict[str, str] = {}
+
+        # Store API key for video/image generation
+        self.google_api_key = google_api_key or os.getenv('GOOGLE_API_KEY') or os.getenv('GEMINI_API_KEY')
+
         # Test Vertex AI configuration if available
         if not self.mock_mode:
             try:
@@ -488,63 +494,73 @@ class GoogleMediaGenerator:
         reference_images: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """
-        Generate a real image using Google Vertex AI Imagen
+        Generate a real image using Google Imagen via google-generativeai SDK
 
         Args:
-            prompt: Enhanced prompt
+            prompt: Enhanced prompt (Mirror Vision YAML prompts work best)
             reference_images: Optional reference images
 
         Returns:
             Dictionary with real image data
         """
         try:
-            # Get project and location from environment or use defaults
-            project = os.getenv('GOOGLE_CLOUD_PROJECT', 'avatar-449218')
-            location = os.getenv('GOOGLE_CLOUD_LOCATION', 'us-central1')
+            from google import genai
+            from google.genai import types
 
-            logging.info(f"Initializing Vertex AI - Project: {project}, Location: {location}")
+            # Configure API
+            api_key = os.getenv('GOOGLE_API_KEY') or os.getenv('GEMINI_API_KEY')
+            if not api_key:
+                logging.warning("No API key found for Imagen generation")
+                return await self._generate_mock_image(prompt, StylePreset.PHOTOREALISTIC)
 
-            # Initialize Vertex AI
-            vertexai.init(project=project, location=location)
+            # Create client (NEW SDK: google-genai package)
+            client = genai.Client(api_key=api_key)
 
-            # Load the Imagen model
-            model = ImageGenerationModel.from_pretrained("imagegeneration@006")
+            logging.info(f"Generating real image with Imagen via genai SDK: {prompt[:100]}...")
 
-            logging.info(f"Generating real image with Vertex AI Imagen: {prompt[:100]}...")
-
-            # Generate image
-            images = model.generate_images(
+            # Generate image using Imagen 4.0 (stable, non-preview model)
+            result = client.models.generate_images(
+                model="imagen-4.0-generate-001",
                 prompt=prompt,
-                number_of_images=1
+                config=types.GenerateImagesConfig(
+                    number_of_images=1,
+                    # aspect_ratio supported: 1:1, 3:4, 4:3, 9:16, 16:9
+                    aspect_ratio="16:9"  # Default for brand satire images
+                )
             )
 
-            # Save the generated image
-            timestamp = int(time.time())
-            filename = f"imagen_{timestamp}.png"
-            filepath = self.static_dir / filename
+            # Extract generated image
+            if result.generated_images:
+                generated_image = result.generated_images[0]
 
-            # Save image to file
-            images[0].save(location=str(filepath))
+                # Save the generated image
+                timestamp = int(time.time())
+                filename = f"imagen_{timestamp}.png"
+                filepath = self.static_dir / filename
 
-            # Read and encode to base64
-            with open(filepath, "rb") as f:
-                image_bytes = f.read()
-                base64_data = base64.b64encode(image_bytes).decode('utf-8')
+                # Write image bytes to file
+                with open(filepath, "wb") as f:
+                    f.write(generated_image.image.image_bytes)
 
-            logging.info(f"Successfully generated image: {filename}")
+                # Read and encode to base64
+                base64_data = base64.b64encode(generated_image.image.image_bytes).decode('utf-8')
 
-            return {
-                "url": f"/static/generated/{filename}",
-                "base64": f"data:image/png;base64,{base64_data}",
-                "model": "imagen-2"
-            }
+                logging.info(f"Successfully generated image with Imagen 4.0: {filename}")
+
+                return {
+                    "url": f"/static/generated/{filename}",
+                    "base64": f"data:image/png;base64,{base64_data}",
+                    "model": "imagen-4.0"
+                }
+            else:
+                raise Exception("No images generated in response")
 
         except ImportError as e:
-            logging.error(f"Vertex AI libraries not installed: {e}")
-            logging.info("Install with: pip install google-cloud-aiplatform")
+            logging.error(f"google-genai library not installed: {e}")
+            logging.info("Install with: pip install -U google-genai")
             return await self._generate_mock_image(prompt, StylePreset.PHOTOREALISTIC)
         except Exception as e:
-            logging.error(f"Vertex AI Imagen failed: {e}, falling back to mock generation")
+            logging.error(f"Imagen generation failed: {e}, falling back to mock generation")
             return await self._generate_mock_image(prompt, StylePreset.PHOTOREALISTIC)
 
     async def _generate_real_video(
@@ -565,7 +581,7 @@ class GoogleMediaGenerator:
             Dictionary with real video data
         """
         try:
-            import google.generativeai as genai
+            from google import genai
             import requests
 
             # Configure API
@@ -578,11 +594,12 @@ class GoogleMediaGenerator:
                     metadata["aspect_ratio"]
                 )
 
-            genai.configure(api_key=api_key)
+            # Create client
+            client = genai.Client(api_key=api_key)
 
             # Check if Veo models are available
             try:
-                models = genai.list_models()
+                models = client.models.list()
                 veo_models = [m for m in models if 'veo' in m.name.lower()]
 
                 if veo_models:
@@ -619,22 +636,30 @@ class GoogleMediaGenerator:
                         logging.info(f"Video generation started! Operation: {operation_name}")
 
                         # Store operation for polling
-                        timestamp = int(time.time())
-                        video_filename = f"veo_video_{timestamp}.mp4"
+                        job_id = str(uuid.uuid4())
+                        self.veo_operations[job_id] = operation_name
 
-                        # For now, create a placeholder since polling isn't implemented yet
-                        logging.info("Video generation initiated (polling not yet implemented)")
-                        logging.info("Using enhanced mock generation for immediate response")
-
-                        # Return mock with metadata indicating Veo was attempted
-                        result = await self._generate_mock_video(
-                            prompt,
-                            metadata["duration"],
-                            metadata["aspect_ratio"]
+                        # Create job tracking entry
+                        self.active_jobs[job_id] = MediaGenerationJob(
+                            job_id=job_id,
+                            media_type=MediaType.VIDEO,
+                            prompt=prompt,
+                            status=GenerationStatus.PROCESSING,
+                            created_at=datetime.now(),
+                            metadata={"operation_name": operation_name, **metadata},
+                            progress=10  # Operation started
                         )
-                        result["veo_operation"] = operation_name
-                        result["veo_status"] = "processing"
-                        return result
+
+                        logging.info(f"Veo video generation job created: {job_id}")
+                        logging.info("Video will be available via polling endpoint")
+
+                        # Return job info for client-side polling
+                        return {
+                            "job_id": job_id,
+                            "status": "processing",
+                            "operation_name": operation_name,
+                            "message": "Video generation in progress - poll /api/video-status for updates"
+                        }
 
                     elif response.status_code == 403:
                         error_data = response.json()
@@ -668,7 +693,7 @@ class GoogleMediaGenerator:
             )
 
         except ImportError:
-            logging.warning("google-generativeai not installed for video generation")
+            logging.warning("google-genai not installed for video generation")
             return await self._generate_mock_video(
                 prompt,
                 metadata["duration"],
@@ -719,16 +744,121 @@ class GoogleMediaGenerator:
 
     async def check_video_status(self, job_id: str) -> Dict[str, Any]:
         """
-        Check the status of a video generation job (async wrapper)
+        Check the status of a video generation job and poll Veo operations
 
         Args:
             job_id: The job ID to check
 
         Returns:
-            Job status dictionary
+            Job status dictionary with video data when complete
         """
-        # Simply return the synchronous status check
-        return self.get_job_status(job_id)
+        try:
+            # Check if job exists
+            if job_id not in self.active_jobs:
+                return {"error": "Job not found", "status": "failed"}
+
+            job = self.active_jobs[job_id]
+
+            # If already complete or failed, return cached status
+            if job.status in [GenerationStatus.COMPLETE, GenerationStatus.FAILED]:
+                return {
+                    "status": job.status.value,
+                    "url": job.media_url,
+                    "thumbnail_url": job.thumbnail_url,
+                    "error": job.error_message,
+                    "progress": job.progress
+                }
+
+            # If processing, poll the Veo operation
+            if job_id in self.veo_operations:
+                operation_name = self.veo_operations[job_id]
+
+                try:
+                    from google import genai
+
+                    if not self.google_api_key:
+                        raise Exception("No API key available for polling")
+
+                    # Create client and poll operation (matching working repo pattern)
+                    client = genai.Client(api_key=self.google_api_key)
+                    operation = client.operations.get(name=operation_name)
+
+                    # Check if operation is done
+                    if operation.done:
+                        logging.info(f"Veo operation complete: {operation_name}")
+
+                        # Extract result
+                        result = operation.result
+                        if result and hasattr(result, 'generated_videos') and result.generated_videos:
+                            generated_video = result.generated_videos[0]
+
+                            # Download video using client.files.download()
+                            video_data = client.files.download(generated_video.video)
+
+                            # Save video file
+                            timestamp = int(time.time())
+                            filename = f"veo_video_{timestamp}.mp4"
+                            filepath = self.static_dir / filename
+
+                            with open(filepath, "wb") as f:
+                                f.write(video_data)
+
+                            logging.info(f"Video saved: {filename}")
+
+                            # Update job status
+                            job.status = GenerationStatus.COMPLETE
+                            job.completed_at = datetime.now()
+                            job.media_url = f"/static/generated/{filename}"
+                            job.progress = 100
+
+                            # Clean up operation tracking
+                            del self.veo_operations[job_id]
+
+                            return {
+                                "status": "complete",
+                                "url": job.media_url,
+                                "progress": 100,
+                                "model": "veo-3.1"
+                            }
+                        else:
+                            # Operation done but no video
+                            raise Exception("Operation completed but no video generated")
+                    else:
+                        # Still processing - update progress estimate
+                        # Veo typically takes 2-5 minutes, estimate based on elapsed time
+                        elapsed = (datetime.now() - job.created_at).total_seconds()
+                        estimated_progress = min(int(10 + (elapsed / 180) * 80), 90)  # 10-90%
+                        job.progress = estimated_progress
+
+                        logging.info(f"Veo operation still processing: {operation_name}, progress: {estimated_progress}%")
+
+                        return {
+                            "status": "processing",
+                            "progress": estimated_progress,
+                            "message": "Video generation in progress..."
+                        }
+
+                except ImportError:
+                    logging.error("google-genai not installed for operation polling")
+                    job.status = GenerationStatus.FAILED
+                    job.error_message = "google-genai library not available"
+                    return {"status": "failed", "error": job.error_message}
+
+                except Exception as e:
+                    logging.error(f"Failed to poll Veo operation: {e}")
+                    # Don't fail immediately - might be transient error
+                    return {
+                        "status": "processing",
+                        "progress": job.progress,
+                        "message": f"Polling error (will retry): {str(e)}"
+                    }
+
+            # No Veo operation - return current status
+            return self.get_job_status(job_id)
+
+        except Exception as e:
+            logging.error(f"Error checking video status: {e}")
+            return {"status": "failed", "error": str(e)}
 
     def cleanup_old_media(self, max_age_hours: int = 24):
         """

@@ -1,0 +1,5 @@
+# Directory for storing generated media files
+# This directory will contain:
+# - Generated images from Google Imagen API
+# - Generated videos from Google Veo API
+# - Mock media files when running in test mode
