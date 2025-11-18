@@ -25,12 +25,12 @@ flask-swagger-ui==4.11.1
 # AI Service APIs (pinned versions)
 openai==2.8.1
 anthropic==0.8.1
-google-generativeai==0.3.2
+google-generativeai==0.8.5  # Keep for backward compatibility (older Veo code)
+google-genai==1.51.0  # NEW SDK for Imagen 4.0 and Veo 3.1
 transformers==4.35.2
 torch==2.1.2
 
-# Google Cloud Media Generation (Vertex AI Imagen)
-google-cloud-aiplatform==1.38.0
+# Google Cloud Storage (for potential media uploads)
 google-cloud-storage==2.10.0
 
 # Async support for media generation
