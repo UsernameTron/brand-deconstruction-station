@@ -804,27 +804,31 @@ class GoogleMediaGenerator:
 
                 try:
                     from google import genai
+                    from google.genai.types import Operation
 
                     if not self.google_api_key:
                         raise Exception("No API key available for polling")
 
-                    # Create client and poll operation (matching working repo pattern)
+                    # Create client (official API docs pattern)
                     client = genai.Client(api_key=self.google_api_key)
 
+                    # Create operation object from name
+                    operation = Operation(name=operation_name)
+
                     logging.info(f"Fetching operation status from Google...")
-                    operation = client.operations.get(operation_name)
+                    # Refresh operation status - pass operation object
+                    operation = client.operations.get(operation)
 
                     # Check if operation is done
                     if operation.done:
                         logging.info(f"Veo operation complete: {operation_name}")
 
-                        # Extract result
-                        result = operation.result
-                        if result and hasattr(result, 'generated_videos') and result.generated_videos:
-                            generated_video = result.generated_videos[0]
+                        # Extract result from response (official docs)
+                        if operation.response and hasattr(operation.response, 'generated_videos') and operation.response.generated_videos:
+                            generated_video = operation.response.generated_videos[0]
 
                             # Download video using client.files.download()
-                            video_data = client.files.download(generated_video.video)
+                            video_data = client.files.download(file=generated_video.video)
 
                             # Save video file
                             timestamp = int(time.time())
