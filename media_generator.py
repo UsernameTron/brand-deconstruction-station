@@ -286,6 +286,13 @@ class GoogleMediaGenerator:
                     job.metadata["duration"],
                     job.metadata["aspect_ratio"]
                 )
+
+                # Mock mode completes immediately
+                job.status = GenerationStatus.COMPLETE
+                job.completed_at = datetime.now()
+                job.media_url = result["url"]
+                job.thumbnail_url = result.get("thumbnail_url")
+                job.progress = 100
             else:
                 # Generate real video with Google Veo
                 result = await self._generate_real_video(
@@ -294,12 +301,23 @@ class GoogleMediaGenerator:
                     reference_images
                 )
 
-            # Update job
-            job.status = GenerationStatus.COMPLETE
-            job.completed_at = datetime.now()
-            job.media_url = result["url"]
-            job.thumbnail_url = result.get("thumbnail_url")
-            job.progress = 100
+                # Veo returns job info (video still processing) or error
+                if result.get("status") == "processing":
+                    # Video generation started, but not complete yet
+                    # Job status already set to PROCESSING above
+                    # The check_video_status method will poll and update when complete
+                    job.metadata["veo_result"] = result
+                    logging.info(f"Veo video generation in progress for job {job.job_id}")
+                elif "url" in result:
+                    # Immediate completion (unlikely with Veo, but handle it)
+                    job.status = GenerationStatus.COMPLETE
+                    job.completed_at = datetime.now()
+                    job.media_url = result["url"]
+                    job.thumbnail_url = result.get("thumbnail_url")
+                    job.progress = 100
+                else:
+                    # Error or unexpected result
+                    raise Exception(f"Unexpected video generation result: {result}")
 
         except Exception as e:
             job.status = GenerationStatus.FAILED
