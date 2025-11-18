@@ -812,7 +812,7 @@ class GoogleMediaGenerator:
                     client = genai.Client(api_key=self.google_api_key)
 
                     logging.info(f"Fetching operation status from Google...")
-                    operation = client.operations.get(name=operation_name)
+                    operation = client.operations.get(operation_name)
 
                     # Check if operation is done
                     if operation.done:
