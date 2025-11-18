@@ -791,6 +791,8 @@ class GoogleMediaGenerator:
             if job_id in self.veo_operations:
                 operation_name = self.veo_operations[job_id]
 
+                logging.info(f"Polling Veo operation for job {job_id}: {operation_name}")
+
                 try:
                     from google import genai
 
@@ -799,6 +801,8 @@ class GoogleMediaGenerator:
 
                     # Create client and poll operation (matching working repo pattern)
                     client = genai.Client(api_key=self.google_api_key)
+
+                    logging.info(f"Fetching operation status from Google...")
                     operation = client.operations.get(name=operation_name)
 
                     # Check if operation is done
@@ -871,7 +875,17 @@ class GoogleMediaGenerator:
                         "message": f"Polling error (will retry): {str(e)}"
                     }
 
-            # No Veo operation - return current status
+            # No Veo operation - check if we lost it or it never existed
+            logging.warning(f"No Veo operation found for job {job_id}")
+            logging.warning(f"Active veo_operations: {list(self.veo_operations.keys())}")
+
+            # Still update progress estimate even without operation tracking
+            if job.status == GenerationStatus.PROCESSING:
+                elapsed = (datetime.now() - job.created_at).total_seconds()
+                estimated_progress = min(int(10 + (elapsed / 180) * 80), 90)
+                job.progress = estimated_progress
+                logging.info(f"Job {job_id} progress estimate: {estimated_progress}% (elapsed: {int(elapsed)}s)")
+
             return self.get_job_status(job_id)
 
         except Exception as e:
