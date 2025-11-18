@@ -691,12 +691,69 @@
                 
                 <!-- Image Generation Results Section -->
                 <div id="image-results-section" class="image-results-section hidden">
-                    <h3 class="glow-purple">🎭 PENTAGRAM PROMPT FRAMEWORK</h3>
+                    <h3 class="glow-purple">🔮 MIRROR VISION PROMPT CRAFTER</h3>
                     <div class="framework-info" style="margin-bottom: 15px; padding: 10px; background: rgba(255,0,255,0.1); border-left: 3px solid #ff00ff; font-size: 0.9rem;">
-                        <strong>PENTAGRAM Framework:</strong> Purpose • Elements • Narrative • Tone • Audience • Guidelines • Results • Aesthetics • Metaphors
+                        <strong>Mirror Vision:</strong> Photorealistic YAML Prompts • 30+ Fidelity Modifiers • Brutal Visual Metaphors • Mirror Universe Pete Voice<br>
+                        <span style="opacity: 0.8; font-size: 0.85rem; color: #ff0066;">⚠️ RAW AND UNFILTERED - NO PR LAYERS</span>
                     </div>
                     <div id="image-concepts-grid" class="image-concepts-grid">
-                        <!-- Generated image concepts will appear here -->
+                        <!-- Generated Mirror Vision image concepts will appear here -->
+                    </div>
+
+                    <!-- New Media Generation Controls -->
+                    <div class="media-generation-controls" style="margin-top: 20px; padding: 15px; background: rgba(0,255,255,0.1); border: 1px solid #00ffff;">
+                        <h4 class="glow-cyan">🎬 Google Media Generation</h4>
+
+                        <!-- Style Preset Selector -->
+                        <div class="style-selector" style="margin: 15px 0;">
+                            <label style="color: #00ff00;">Style Preset:</label>
+                            <select id="style-preset" style="background: #000; color: #00ff00; border: 1px solid #00ff00; padding: 5px;">
+                                <option value="editorial">Editorial - Professional publication-ready</option>
+                                <option value="photorealistic">Photorealistic - Hyper-realistic detail</option>
+                                <option value="cyberpunk">Cyberpunk - Dark neon dystopian</option>
+                                <option value="vintage">Vintage - Film noir retro</option>
+                                <option value="documentary">Documentary - Raw authentic</option>
+                                <option value="cinematic">Cinematic - Epic movie quality</option>
+                                <option value="satirical">Satirical - Darkly humorous</option>
+                            </select>
+                        </div>
+
+                        <!-- Image Generation -->
+                        <div class="generation-section" style="margin: 15px 0;">
+                            <button id="generate-actual-images" class="btn" style="background: linear-gradient(135deg, #ff00ff, #00ffff);">
+                                🖼️ Generate Actual Images (Imagen)
+                            </button>
+                            <span id="image-gen-status" style="margin-left: 10px; color: #ffff00;"></span>
+                        </div>
+
+                        <!-- Video Generation -->
+                        <div class="generation-section" style="margin: 15px 0;">
+                            <label style="color: #00ff00;">Video Settings:</label>
+                            <div style="display: flex; gap: 10px; margin-top: 5px;">
+                                <select id="video-duration" style="background: #000; color: #00ff00; border: 1px solid #00ff00; padding: 5px;">
+                                    <option value="4">4 seconds</option>
+                                    <option value="6" selected>6 seconds</option>
+                                    <option value="8">8 seconds</option>
+                                </select>
+                                <select id="video-aspect" style="background: #000; color: #00ff00; border: 1px solid #00ff00; padding: 5px;">
+                                    <option value="16:9">16:9 Landscape</option>
+                                    <option value="9:16">9:16 Vertical</option>
+                                </select>
+                                <select id="video-resolution" style="background: #000; color: #00ff00; border: 1px solid #00ff00; padding: 5px;">
+                                    <option value="720p">720p</option>
+                                    <option value="1080p" selected>1080p</option>
+                                </select>
+                            </div>
+                            <button id="generate-video" class="btn" style="background: linear-gradient(135deg, #00ff00, #ff00ff); margin-top: 10px;">
+                                🎥 Generate Video (Veo)
+                            </button>
+                            <span id="video-gen-status" style="margin-left: 10px; color: #ffff00;"></span>
+                        </div>
+
+                        <!-- Generated Media Results -->
+                        <div id="generated-media" style="margin-top: 20px;">
+                            <!-- Generated images and videos will appear here -->
+                        </div>
                     </div>
                 </div>
             </div>
@@ -757,6 +814,10 @@
             document.getElementById('export-pdf').addEventListener('click', () => exportResults('pdf'));
             document.getElementById('export-html').addEventListener('click', () => exportResults('html'));
             document.getElementById('generate-images').addEventListener('click', generateImages);
+
+            // New media generation buttons
+            document.getElementById('generate-actual-images')?.addEventListener('click', generateActualImages);
+            document.getElementById('generate-video')?.addEventListener('click', generateVideo);
         }
         
         // Check system health
@@ -1045,6 +1106,180 @@
             
             // Scroll to results
             resultsSection.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        // Generate actual images using Google Imagen
+        async function generateActualImages() {
+            if (!currentAnalysisId) {
+                alert('No analysis results available');
+                return;
+            }
+
+            const btn = document.getElementById('generate-actual-images');
+            const status = document.getElementById('image-gen-status');
+            const stylePreset = document.getElementById('style-preset').value;
+
+            try {
+                btn.disabled = true;
+                btn.textContent = '🔄 Generating...';
+                status.textContent = 'Calling Google Imagen API...';
+
+                const response = await fetch('/api/generate-actual-images', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        analysis_id: currentAnalysisId,
+                        style_preset: stylePreset
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    displayGeneratedImages(data.generated_images, data.mock_mode);
+                    status.textContent = data.mock_mode ? 'Mock images generated (API key needed for real images)' : 'Images generated successfully!';
+                } else {
+                    throw new Error(data.error || 'Generation failed');
+                }
+            } catch (error) {
+                console.error('Image generation error:', error);
+                status.textContent = `Error: ${error.message}`;
+                status.style.color = '#ff0000';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '🖼️ Generate Actual Images (Imagen)';
+            }
+        }
+
+        // Generate video using Google Veo
+        async function generateVideo() {
+            if (!currentAnalysisId) {
+                alert('No analysis results available');
+                return;
+            }
+
+            const btn = document.getElementById('generate-video');
+            const status = document.getElementById('video-gen-status');
+            const stylePreset = document.getElementById('style-preset').value;
+            const duration = document.getElementById('video-duration').value;
+            const aspectRatio = document.getElementById('video-aspect').value;
+            const resolution = document.getElementById('video-resolution').value;
+
+            try {
+                btn.disabled = true;
+                btn.textContent = '🔄 Generating...';
+                status.textContent = 'Calling Google Veo API...';
+
+                const response = await fetch('/api/generate-videos', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        analysis_id: currentAnalysisId,
+                        style_preset: stylePreset,
+                        duration: parseInt(duration),
+                        aspect_ratio: aspectRatio,
+                        resolution: resolution
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    if (data.status === 'processing') {
+                        status.textContent = `Processing... Job ID: ${data.job_id} (Est. ${data.estimated_time})`;
+                        // Poll for video status
+                        pollVideoStatus(data.job_id);
+                    } else {
+                        throw new Error(data.error || 'Generation failed');
+                    }
+                } else {
+                    throw new Error(data.error || 'Generation failed');
+                }
+            } catch (error) {
+                console.error('Video generation error:', error);
+                status.textContent = `Error: ${error.message}`;
+                status.style.color = '#ff0000';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '🎥 Generate Video (Veo)';
+            }
+        }
+
+        // Poll for video generation status
+        async function pollVideoStatus(jobId) {
+            const status = document.getElementById('video-gen-status');
+            const checkInterval = setInterval(async () => {
+                try {
+                    const response = await fetch(`/api/video-status/${jobId}`);
+                    const data = await response.json();
+
+                    if (data.status === 'completed') {
+                        clearInterval(checkInterval);
+                        status.textContent = 'Video generated successfully!';
+                        displayGeneratedVideo(data.video_url, data.metadata);
+                    } else if (data.status === 'failed') {
+                        clearInterval(checkInterval);
+                        status.textContent = `Generation failed: ${data.error}`;
+                        status.style.color = '#ff0000';
+                    } else {
+                        status.textContent = `Processing... ${data.progress || 'In queue'}`;
+                    }
+                } catch (error) {
+                    clearInterval(checkInterval);
+                    status.textContent = `Error checking status: ${error.message}`;
+                    status.style.color = '#ff0000';
+                }
+            }, 3000); // Check every 3 seconds
+        }
+
+        // Display generated images
+        function displayGeneratedImages(images, mockMode) {
+            const container = document.getElementById('generated-media');
+
+            if (mockMode) {
+                container.innerHTML = '<div style="color: #ffff00; margin: 10px 0;">⚠️ Mock Mode: Using placeholders (add Google API key for real images)</div>';
+            }
+
+            images.forEach((img, index) => {
+                if (img.error) {
+                    container.innerHTML += `
+                        <div style="margin: 10px 0; padding: 10px; background: rgba(255,0,0,0.1); border: 1px solid #ff0000;">
+                            <strong>Image ${index + 1} Error:</strong> ${img.error}
+                        </div>
+                    `;
+                } else {
+                    container.innerHTML += `
+                        <div style="margin: 15px 0; padding: 10px; background: rgba(0,255,255,0.05); border: 1px solid #00ffff;">
+                            <h5 style="color: #00ffff;">Generated Image ${index + 1}</h5>
+                            <img src="${img.image_url}" style="max-width: 100%; margin: 10px 0;">
+                            <details style="margin-top: 10px;">
+                                <summary style="color: #00ff00; cursor: pointer;">View Styled Prompt</summary>
+                                <pre style="color: #ffffff; margin-top: 10px; white-space: pre-wrap;">${img.styled_prompt}</pre>
+                            </details>
+                        </div>
+                    `;
+                }
+            });
+        }
+
+        // Display generated video
+        function displayGeneratedVideo(videoUrl, metadata) {
+            const container = document.getElementById('generated-media');
+
+            container.innerHTML += `
+                <div style="margin: 15px 0; padding: 10px; background: rgba(0,255,0,0.05); border: 1px solid #00ff00;">
+                    <h5 style="color: #00ff00;">Generated Video</h5>
+                    <video controls style="max-width: 100%; margin: 10px 0;">
+                        <source src="${videoUrl}" type="video/mp4">
+                        Your browser does not support the video tag.
+                    </video>
+                    ${metadata ? `<div style="color: #ffffff; font-size: 0.9rem;">Duration: ${metadata.duration}s | Resolution: ${metadata.resolution} | Aspect: ${metadata.aspect_ratio}</div>` : ''}
+                </div>
+            `;
         }
     </script>
 </body>

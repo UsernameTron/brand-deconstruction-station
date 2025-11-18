@@ -28,6 +28,7 @@ from security_utils import validate_url_input, validate_api_key, sanitize_filena
 # Import Google media generation modules
 from style_modifiers import StyleModifierEngine, StylePreset, MediaType
 from media_generator import GoogleMediaGenerator
+from mirror_vision_engine import MirrorVisionEngine, SatiricalTarget, VisualMetaphorPattern
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_talisman import Talisman
@@ -124,6 +125,10 @@ media_generator = GoogleMediaGenerator(
 )
 logger.info(f"Media generator mock_mode: {media_generator.mock_mode}")
 
+# Initialize Mirror Vision Prompt Crafter - RAW AND UNFILTERED
+mirror_vision = MirrorVisionEngine()
+logger.info("Mirror Vision engine initialized - NO PR LAYERS, COMPLETELY RAW")
+
 class BrandAnalysisEngine:
     """AI-powered brand analysis engine with multi-agent coordination"""
     
@@ -164,43 +169,38 @@ class BrandAnalysisEngine:
                 print(f"⚠️  OpenAI client initialization failed: {e}")
         else:
             print("⚠️  Running in mock mode - set OpenAI API key for real analysis")
-    
-    def _build_pentagram_prompt(self, website_url, vulnerabilities, satirical_angles, image_number):
-        """Build structured prompt using PENTAGRAM framework for image generation
-        
-        P - Purpose: Define the core satirical intent
-        E - Elements: Key visual components and symbols
-        N - Narrative: Story or message being conveyed
-        T - Tone: Emotional and stylistic approach
-        A - Audience: Target understanding and cultural context
-        G - Guidelines: Technical and creative constraints
-        R - Results: Expected output characteristics
-        A - Aesthetics: Visual style and artistic direction
-        M - Metaphors: Symbolic representations and analogies
+
+    def _build_mirror_vision_prompt(self, website_url, vulnerabilities, satirical_angles, image_number, severity="brutal"):
+        """Build Mirror Vision YAML prompt - RAW AND UNFILTERED
+
+        NO PR LAYERS - Complete brutal satire using photorealistic specifications
+        Generates YAML structure optimized for MidJourney v6+ and Google Imagen
         """
-        
-        # Extract key elements for framework
+
+        # Extract key elements
         primary_vulnerability = vulnerabilities[0] if vulnerabilities else "Corporate Contradictions"
         primary_angle = satirical_angles[0] if satirical_angles else "Generic corporate hypocrisy"
         brand_name = website_url.replace('https://', '').replace('http://', '').split('/')[0]
-        
-        pentagram_structure = f"""
-P - PURPOSE: Create satirical visual commentary exposing "{primary_vulnerability}" in {brand_name}'s brand strategy
-E - ELEMENTS: Corporate imagery, visual metaphors, symbolic contradictions, brand iconography subversion
-N - NARRATIVE: "{primary_angle}" - revealing the gap between corporate messaging and reality
-T - TONE: Witty, clever, incisive yet professional - satirical without being offensive or crude
-A - AUDIENCE: Media-literate consumers who understand corporate marketing tactics and visual symbolism
-G - GUIDELINES: Professional quality, suitable for editorial use, legally defensible parody/commentary
-R - RESULTS: Single powerful image concept that immediately communicates the satirical point
-A - AESTHETICS: Contemporary editorial illustration style, clean composition, symbolic clarity
-M - METAPHORS: Visual symbols that represent {primary_vulnerability} through recognizable corporate imagery
 
-TARGET VULNERABILITIES: {', '.join(vulnerabilities[:3])}
-SATIRICAL PERSPECTIVES: {', '.join(satirical_angles[:2])}
-BRAND CONTEXT: {brand_name}
-IMAGE SEQUENCE: #{image_number} of conceptual series"""
-        
-        return pentagram_structure
+        # Determine satirical target type
+        target_keywords = (primary_vulnerability + " " + primary_angle).lower()
+        if any(word in target_keywords for word in ["tech", "ai", "algorithm", "data", "software", "platform"]):
+            target_type = SatiricalTarget.TECH
+        elif any(word in target_keywords for word in ["political", "government", "policy", "regulation"]):
+            target_type = SatiricalTarget.POLITICAL
+        else:
+            target_type = SatiricalTarget.CORPORATE
+
+        # Generate complete Mirror Vision prompt with YAML structure
+        mirror_prompt = mirror_vision.generate_prompt(
+            brand_name=brand_name,
+            vulnerability=primary_vulnerability,
+            satirical_angle=primary_angle,
+            target_type=target_type,
+            severity=severity  # brutal, ruthless, or lethal
+        )
+
+        return mirror_prompt
         
         
     def scrape_website(self, url):
@@ -391,78 +391,73 @@ Be clever, satirical, and professionally critical without being offensive."""
             'website_data': website_data
         }
     
-    def generate_satirical_images(self, analysis_data, count=1):
-        """Generate satirical brand image concepts using PENTAGRAM framework"""
+    def generate_satirical_images(self, analysis_data, count=1, severity="brutal"):
+        """Generate satirical brand image concepts using Mirror Vision YAML prompts - RAW AND UNFILTERED"""
         try:
             # Get brand analysis data
             website_url = analysis_data.get('website_data', {}).get('url', 'unknown brand')
             vulnerabilities = [v.get('name', '') for v in analysis_data.get('vulnerabilities', [])]
             satirical_angles = analysis_data.get('satirical_angles', [])
-            
+
             images = []
             for i in range(count):
-                # Apply PENTAGRAM Framework for structured prompt generation
-                pentagram_prompt = self._build_pentagram_prompt(website_url, vulnerabilities, satirical_angles, i+1)
-                
-                # Create enhanced prompt using PENTAGRAM structure
-                prompt = f"""PENTAGRAM PROMPT FRAMEWORK - SATIRICAL BRAND ANALYSIS
+                # Generate Mirror Vision YAML prompt - NO PR LAYERS
+                mirror_prompt = self._build_mirror_vision_prompt(
+                    website_url,
+                    vulnerabilities,
+                    satirical_angles,
+                    i+1,
+                    severity=severity
+                )
 
-{pentagram_prompt}
+                # Convert to YAML string for storage and display
+                yaml_prompt = mirror_prompt.to_yaml()
 
-DIRECTIVE: Generate a witty, satirical image description that exposes corporate hypocrisy through visual metaphor. Be creative and humorous but not offensive. Format as a detailed visual description suitable for professional image generation.
+                # Get Imagen-compatible prompt for actual generation
+                imagen_prompt = mirror_prompt.to_imagen_prompt()
 
-OUTPUT: Respond with just the image description, no preamble or extra text."""
+                # Extract caption for display
+                caption = mirror_prompt.caption
 
-                try:
-                    if self.openai_client:
-                        # Use GPT-4o to generate satirical image concept
-                        response = self.openai_client.chat.completions.create(
-                            model="gpt-4o",
-                            messages=[{"role": "user", "content": prompt}],
-                            max_tokens=200,
-                            temperature=0.8
-                        )
-                        
-                        content = response.choices[0].message.content
-                        image_concept = content.strip() if content else "No image concept generated"
-                        source = 'gpt-4o'
-                    else:
-                        raise Exception("OpenAI client not available")
-                        
-                except Exception as e:
-                    print(f"GPT-4o image generation failed: {e}")
-                    # Fallback to enhanced PENTAGRAM-structured concept
-                    brand_name = website_url.replace('https://', '').replace('http://', '').split('/')[0]
-                    primary_vulnerability = vulnerabilities[0] if vulnerabilities else 'corporate contradictions'
-                    primary_angle = satirical_angles[0] if satirical_angles else 'generic corporate hypocrisy'
-                    
-                    image_concept = f"PENTAGRAM-Structured Satirical Concept: Visual metaphor exposing {brand_name}'s {primary_vulnerability} through {primary_angle}. A professionally composed editorial illustration that cleverly subverts corporate imagery to reveal underlying contradictions in brand messaging."
-                    source = 'pentagram-fallback'
-                
                 images.append({
                     'id': f'img_{i+1}_{int(time.time())}',
-                    'concept': image_concept,
-                    'prompt': prompt,
-                    'status': 'concept_generated',
+                    'concept': imagen_prompt,  # Use Imagen-compatible prompt as concept
+                    'yaml_prompt': yaml_prompt,  # Full YAML structure
+                    'caption': caption,  # Mirror Universe Pete caption
+                    'prompt': imagen_prompt,  # For backward compatibility
+                    'status': 'mirror_vision_generated',
                     'timestamp': datetime.now().isoformat(),
-                    'source': source
+                    'source': 'mirror-vision-unfiltered',
+                    'severity': severity,
+                    'metadata': {
+                        'resolution': mirror_prompt.resolution,
+                        'camera': mirror_prompt.camera,
+                        'parameters': mirror_prompt.parameters
+                    }
                 })
-                
+
             return images
-            
+
         except Exception as e:
-            print(f"Image generation error: {e}")
-            # Safe fallback with PENTAGRAM structure awareness
+            print(f"Mirror Vision generation error: {e}")
+            # Fallback with basic Mirror Vision structure
             images = []
             brand_name = website_url.replace('https://', '').replace('http://', '').split('/')[0] if 'website_url' in locals() else 'Unknown Brand'
+            primary_vulnerability = vulnerabilities[0] if 'vulnerabilities' in locals() and vulnerabilities else 'corporate contradictions'
+
             for i in range(count):
+                fallback_concept = f"Photorealistic corporate environment exposing {brand_name}'s {primary_vulnerability}. 12K resolution, Path-traced, ARRI Alexa 65, Zeiss Otus 85mm f/1.4. Brutal visual metaphor showing the gap between corporate messaging and reality."
+
                 images.append({
                     'id': f'img_{i+1}_{int(time.time())}',
-                    'concept': f'PENTAGRAM Framework Concept #{i+1}: Satirical editorial illustration analyzing {brand_name} corporate messaging contradictions through visual metaphor',
-                    'prompt': f'PENTAGRAM fallback prompt for {brand_name}',
-                    'status': 'pentagram_fallback_generated',
+                    'concept': fallback_concept,
+                    'yaml_prompt': f"# Mirror Vision Fallback\ndescription: {fallback_concept}",
+                    'caption': f"The evidence speaks for itself. {brand_name}'s {primary_vulnerability} exposed through architectural truth-telling.",
+                    'prompt': fallback_concept,
+                    'status': 'mirror_vision_fallback',
                     'timestamp': datetime.now().isoformat(),
-                    'source': 'pentagram-emergency-fallback'
+                    'source': 'mirror-vision-emergency-fallback',
+                    'severity': severity
                 })
             return images
 
