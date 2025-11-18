@@ -19,11 +19,80 @@ import zipfile
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 import io
+import logging
+
+# Import security utilities
+from security_utils import validate_url_input, validate_api_key, sanitize_filename, rate_limit_key
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from flask_talisman import Talisman
+from logging_config import setup_logging, log_analysis
+from monitoring import (
+    setup_sentry,
+    setup_prometheus,
+    record_analysis,
+    record_analysis_duration,
+    increment_active_analyses,
+    decrement_active_analyses,
+    record_api_request
+)
 
 # Load environment variables from .env file
 load_dotenv()
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max request size
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', os.urandom(32).hex())
+
+# Configure structured logging with rotation
+logger = setup_logging(app)
+logger.info("🎭 Brand Deconstruction Station starting...")
+
+# Initialize monitoring
+setup_sentry()
+setup_prometheus(app)
+
+# Configure rate limiting
+limiter = Limiter(
+    app=app,
+    key_func=rate_limit_key,
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri="memory://",
+    strategy="fixed-window"
+)
+
+# Configure security headers
+# Note: HTTPS enforcement disabled for local development
+# Enable force_https=True in production
+csp = {
+    'default-src': ["'self'"],
+    'script-src': ["'self'", "'unsafe-inline'"],  # TODO: Remove unsafe-inline in production
+    'style-src': ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+    'font-src': ["'self'", "https://fonts.gstatic.com", "data:"],
+    'img-src': ["'self'", "data:", "https:"],
+    'connect-src': ["'self'"],
+}
+
+# Only apply Talisman in production
+if os.getenv('FLASK_ENV') == 'production':
+    Talisman(
+        app,
+        content_security_policy=csp,
+        force_https=True,
+        strict_transport_security=True,
+        strict_transport_security_max_age=31536000,
+        frame_options='DENY',
+        referrer_policy='strict-origin-when-cross-origin'
+    )
+    logger.info("✅ Security headers enabled (production mode)")
+else:
+    # Development mode - no HTTPS enforcement
+    Talisman(
+        app,
+        force_https=False,
+        content_security_policy=False
+    )
+    logger.info("⚠️  Security headers relaxed (development mode)")
 
 # Global state for agent simulation
 agent_states = {
@@ -41,11 +110,12 @@ class BrandAnalysisEngine:
     
     def __init__(self):
         # Prioritize OpenAI API - only requirement
-        self.openai_api_key = os.getenv('OPENAI_API_KEY')
-        self.anthropic_api_key = os.getenv('ANTHROPIC_API_KEY')
-        self.google_api_key = os.getenv('GOOGLE_API_KEY')
-        self.huggingface_token = os.getenv('HUGGINGFACE_API_TOKEN')
-        self.elevenlabs_api_key = os.getenv('ELEVENLABS_API_KEY')
+        # Use validate_api_key to check for placeholder values
+        self.openai_api_key = validate_api_key(os.getenv('OPENAI_API_KEY'), 'OpenAI')
+        self.anthropic_api_key = validate_api_key(os.getenv('ANTHROPIC_API_KEY'), 'Anthropic')
+        self.google_api_key = validate_api_key(os.getenv('GOOGLE_API_KEY'), 'Google')
+        self.huggingface_token = validate_api_key(os.getenv('HUGGINGFACE_API_TOKEN'), 'HuggingFace')
+        self.elevenlabs_api_key = validate_api_key(os.getenv('ELEVENLABS_API_KEY'), 'ElevenLabs')
         
         # OpenAI is the primary requirement
         if not self.openai_api_key:
@@ -403,20 +473,23 @@ def favicon():
     return response
 
 @app.route('/api/analyze', methods=['POST'])
+@limiter.limit("10 per minute")  # Rate limit: 10 analyses per minute
+@validate_url_input
 def analyze_brand():
-    """Start brand analysis process"""
+    """Start brand analysis process with SSRF protection and rate limiting"""
     global current_analysis_id, analysis_results
-    
+
     data = request.get_json()
     url = data.get('url')
     analysis_type = data.get('type', 'deep')
-    
-    if not url:
-        return jsonify({'error': 'URL is required'}), 400
-    
+
+    # URL is already validated by @validate_url_input decorator
     # Generate unique analysis ID
     analysis_id = f'analysis_{int(time.time())}_{random.randint(1000, 9999)}'
     current_analysis_id = analysis_id
+
+    # Log analysis start with structured data
+    log_analysis(logger, analysis_id, url, analysis_type, 'started')
     
     # Reset agent states
     for agent in agent_states:
@@ -424,52 +497,70 @@ def analyze_brand():
     
     # Start analysis in background thread
     def run_analysis():
+        start_time = time.time()
+        increment_active_analyses()
+
         try:
             # Step 1: Website scraping (Research Agent)
             agent_states['research']['status'] = 'Scraping website...'
             website_data = brand_engine.scrape_website(url)
-            
+
             # Simulate progress for research agent
             for progress in range(0, 101, 20):
                 agent_states['research']['progress'] = progress
                 time.sleep(0.5)
             agent_states['research']['status'] = 'Complete'
-            
+
             # Step 2: Brand analysis (CEO Agent)
             agent_states['ceo']['status'] = 'Analyzing brand strategy...'
             for progress in range(0, 101, 15):
                 agent_states['ceo']['progress'] = progress
                 time.sleep(0.7)
-            
+
             brand_analysis = brand_engine.analyze_brand_vulnerabilities(website_data, analysis_type)
             agent_states['ceo']['status'] = 'Complete'
-            
+
             # Step 3: Performance metrics (Performance Agent)
             agent_states['performance']['status'] = 'Calculating metrics...'
             for progress in range(0, 101, 25):
                 agent_states['performance']['progress'] = progress
                 time.sleep(0.4)
             agent_states['performance']['status'] = 'Complete'
-            
+
             # Step 4: Image concepts (Image Agent)
             agent_states['image']['status'] = 'Generating concepts...'
             for progress in range(0, 101, 30):
                 agent_states['image']['progress'] = progress
                 time.sleep(0.3)
             agent_states['image']['status'] = 'Complete'
-            
+
             # Store results
             analysis_results[analysis_id] = brand_analysis
-            
+
             # Mark all agents as inactive
             for agent in agent_states:
                 agent_states[agent]['active'] = False
-                
+
+            # Record successful analysis
+            duration = time.time() - start_time
+            record_analysis(analysis_type, 'success')
+            record_analysis_duration(analysis_type, duration)
+            log_analysis(logger, analysis_id, url, analysis_type, 'completed')
+
         except Exception as e:
-            print(f"Analysis error: {e}")
+            logger.error(f"Analysis error for {analysis_id}: {e}", exc_info=True)
             for agent in agent_states:
                 agent_states[agent]['status'] = 'Error'
                 agent_states[agent]['active'] = False
+
+            # Record failed analysis
+            duration = time.time() - start_time
+            record_analysis(analysis_type, 'error')
+            record_analysis_duration(analysis_type, duration)
+            log_analysis(logger, analysis_id, url, analysis_type, 'failed')
+
+        finally:
+            decrement_active_analyses()
     
     # Start analysis thread
     thread = threading.Thread(target=run_analysis)

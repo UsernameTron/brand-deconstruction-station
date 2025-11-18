@@ -2,14 +2,14 @@
 # MacOS launcher for Brand Deconstruction Station
 cd "$(dirname "$0")"
 
-# Source API keys from Desktop/keys.env if it exists
-if [ -f "/Users/cpconnor/Desktop/keys.env" ]; then
-    set -a  # automatically export all variables
-    source "/Users/cpconnor/Desktop/keys.env"
-    set +a
-fi
-
 echo "🎭 Launching Brand Deconstruction Station..."
-echo "📡 Opening http://localhost:3000 in your browser shortly..."
+echo "📡 Opening Terminal with server and browser launcher..."
 
-open -a Terminal ./start.sh
+# Use the dedicated launch script that handles both server and browser
+open -a Terminal ./launch_with_browser.sh
+
+echo "✅ Brand Deconstruction Station is starting!"
+echo "📱 Terminal window will open showing progress"
+echo "🌐 Browser will automatically open when server is ready"
+echo ""
+echo "🛑 To stop: Close the Terminal window or press Ctrl+C in Terminal"

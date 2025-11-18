@@ -91,4 +91,37 @@ echo "Press Ctrl+C to stop the server"
 echo "="*50
 echo ""
 
-python3 app.py
+# Check if we should auto-open browser (skip if called from desktop launcher)
+if [ "$SKIP_BROWSER" != "true" ]; then
+    # Start Flask app in background and open browser
+    python3 app.py &
+    FLASK_PID=$!
+
+    # Wait for server to start then open browser
+    echo "⏳ Waiting for server to start..."
+    sleep 3
+
+    # Open browser
+    echo "🌐 Opening browser at http://localhost:3000..."
+    if command -v open &> /dev/null; then
+        # macOS
+        open http://localhost:3000
+    elif command -v xdg-open &> /dev/null; then
+        # Linux
+        xdg-open http://localhost:3000
+    elif command -v start &> /dev/null; then
+        # Windows
+        start http://localhost:3000
+    else
+        echo "⚠️  Could not auto-open browser. Please navigate to http://localhost:3000"
+    fi
+
+    echo "✅ Browser launched! App should be loading..."
+    echo ""
+
+    # Wait for Flask process to finish
+    wait $FLASK_PID
+else
+    # Just start the Flask app (browser will be opened by launcher)
+    python3 app.py
+fi
