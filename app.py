@@ -20,9 +20,14 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 import io
 import logging
+import asyncio
 
 # Import security utilities
 from security_utils import validate_url_input, validate_api_key, sanitize_filename, rate_limit_key
+
+# Import Google media generation modules
+from style_modifiers import StyleModifierEngine, StylePreset, MediaType
+from media_generator import GoogleMediaGenerator
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_talisman import Talisman
@@ -39,6 +44,11 @@ from monitoring import (
 
 # Load environment variables from .env file
 load_dotenv()
+# Also try loading from Desktop keys.env if it exists
+desktop_keys = os.path.expanduser('~/Desktop/keys.env')
+if os.path.exists(desktop_keys):
+    load_dotenv(desktop_keys, override=True)
+    logger.info(f"Loaded API keys from {desktop_keys}") if 'logger' in dir() else None
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max request size
@@ -104,6 +114,15 @@ agent_states = {
 
 analysis_results = {}
 current_analysis_id = None
+
+# Initialize Google media generation engines
+style_engine = StyleModifierEngine()
+google_api_key = os.getenv('GOOGLE_API_KEY')
+logger.info(f"Google API Key present: {bool(google_api_key)}")
+media_generator = GoogleMediaGenerator(
+    google_api_key=google_api_key
+)
+logger.info(f"Media generator mock_mode: {media_generator.mock_mode}")
 
 class BrandAnalysisEngine:
     """AI-powered brand analysis engine with multi-agent coordination"""
@@ -574,6 +593,7 @@ def analyze_brand():
     })
 
 @app.route('/api/agent-status')
+@limiter.limit("2000 per hour")  # Allow polling every ~2 seconds
 def get_agent_status():
     """Get current agent status and progress"""
     return jsonify(agent_states)
@@ -765,6 +785,208 @@ def export_results(format, analysis_id):
     else:
         return jsonify({'error': 'Unsupported format'}), 400
 
+@app.route('/api/generate-actual-images', methods=['POST'])
+@limiter.limit("5 per minute")
+def generate_actual_images():
+    """Generate actual images using Google Imagen API with style modifiers"""
+    data = request.json
+    analysis_id = data.get('analysis_id')
+    style_preset_str = data.get('style_preset', 'editorial')
+    custom_modifiers = data.get('custom_modifiers', [])
+
+    # Debug logging
+    logger.info(f"Generate actual images request - Analysis ID: {analysis_id}")
+    logger.info(f"Current analysis IDs in memory: {list(analysis_results.keys())}")
+
+    if not analysis_id or analysis_id not in analysis_results:
+        logger.error(f"Analysis ID {analysis_id} not found in results")
+        return jsonify({'error': 'Invalid analysis ID'}), 400
+
+    analysis = analysis_results[analysis_id]
+    logger.info(f"Found analysis with keys: {list(analysis.keys())}")
+
+    # Check if we have image concepts (stored in 'generated_images' key)
+    if 'generated_images' not in analysis or not analysis['generated_images']:
+        logger.error(f"No image concepts in analysis. Available keys: {list(analysis.keys())}")
+        return jsonify({'error': 'No image concepts available for this analysis. Please generate image prompts first.'}), 400
+
+    # Convert string to StylePreset enum
+    try:
+        style_preset = StylePreset(style_preset_str)
+    except ValueError:
+        style_preset = StylePreset.EDITORIAL
+
+    generated_images = []
+
+    # Run async generation in sync context
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    try:
+        for concept in analysis['generated_images'][:1]:  # Generate only 1 image
+            # Apply style modifiers to the concept (key is 'concept' not 'description')
+            styled_prompt = style_engine.apply_modifiers(
+                base_prompt=concept['concept'],
+                style_preset=style_preset,
+                media_type=MediaType.IMAGE,
+                custom_modifiers=custom_modifiers
+            )
+
+            # Generate actual image
+            result = loop.run_until_complete(
+                media_generator.generate_image(
+                    prompt=styled_prompt,
+                    style_preset=style_preset,
+                    custom_modifiers=custom_modifiers
+                )
+            )
+
+            # Check for 'complete' status (not 'success') - matches media_generator return value
+            if result['status'] == 'complete':
+                generated_images.append({
+                    'original_concept': concept['concept'],
+                    'styled_prompt': styled_prompt,
+                    'image_url': result['image_url'],  # Use 'image_url' key from media_generator
+                    'metadata': result.get('metadata', {})
+                })
+            else:
+                generated_images.append({
+                    'original_concept': concept['concept'],
+                    'error': result.get('error', 'Generation failed')
+                })
+
+        return jsonify({
+            'status': 'success',
+            'analysis_id': analysis_id,
+            'style_preset': style_preset.value,  # Convert enum to string
+            'generated_images': generated_images,
+            'mock_mode': media_generator.mock_mode
+        })
+
+    except Exception as e:
+        logger.error(f"Image generation error: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        loop.close()
+
+@app.route('/api/generate-videos', methods=['POST'])
+@limiter.limit("2 per minute")
+def generate_videos():
+    """Generate videos using Google Veo API with style modifiers"""
+    data = request.json
+    analysis_id = data.get('analysis_id')
+    style_preset_str = data.get('style_preset', 'cinematic')
+    duration = data.get('duration', 6)  # 4, 6, or 8 seconds
+    aspect_ratio = data.get('aspect_ratio', '16:9')  # 16:9 or 9:16
+    resolution = data.get('resolution', '1080p')  # 720p or 1080p
+
+    if not analysis_id or analysis_id not in analysis_results:
+        return jsonify({'error': 'Invalid analysis ID'}), 400
+
+    analysis = analysis_results[analysis_id]
+
+    # Get brand vulnerabilities for video generation
+    vulnerabilities = analysis.get('vulnerabilities', [])
+    satirical_angles = analysis.get('satirical_angles', [])
+
+    if not vulnerabilities:
+        return jsonify({'error': 'No vulnerabilities available for video generation'}), 400
+
+    # Convert string to StylePreset enum
+    try:
+        style_preset = StylePreset(style_preset_str)
+    except ValueError:
+        style_preset = StylePreset.CINEMATIC
+
+    # Run async generation in sync context
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    try:
+        # Create video prompt based on primary vulnerability
+        primary_vuln = vulnerabilities[0]
+        subject = f"Corporate brand showing {primary_vuln['name']}"
+        action = satirical_angles[0] if satirical_angles else "revealing corporate contradictions"
+
+        # Generate Veo prompt with modifiers
+        veo_prompt = style_engine.generate_veo_prompt(
+            subject=subject,
+            action=action,
+            style_preset=style_preset,
+            duration=duration,
+            aspect_ratio=aspect_ratio,
+            resolution=resolution
+        )
+
+        # Generate video
+        result = loop.run_until_complete(
+            media_generator.generate_video(
+                prompt=veo_prompt['full_text'],
+                style_preset=style_preset,
+                duration=duration,
+                aspect_ratio=aspect_ratio,
+                resolution=resolution
+            )
+        )
+
+        if result['status'] in ['processing', 'pending']:
+            # Video generation started, return job ID for status checking
+            return jsonify({
+                'status': 'processing',
+                'job_id': result['job_id'],
+                'veo_prompt': veo_prompt,
+                'estimated_time': f"{duration + 10} seconds",
+                'mock_mode': media_generator.mock_mode
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'error': result.get('error', 'Video generation failed')
+            }), 500
+
+    except Exception as e:
+        logger.error(f"Video generation error: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        loop.close()
+
+@app.route('/api/video-status/<job_id>')
+@limiter.limit("1000 per hour")  # Allow frequent polling (1 request every 3.6 seconds)
+def check_video_status(job_id):
+    """Check the status of a video generation job"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    try:
+        status = loop.run_until_complete(
+            media_generator.check_video_status(job_id)
+        )
+        return jsonify(status)
+    except Exception as e:
+        logger.error(f"Error checking video status: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        loop.close()
+
+@app.route('/api/style-presets')
+def get_style_presets():
+    """Get available style presets for media generation"""
+    # Get the preset names from the style engine
+    preset_names = ['editorial', 'photorealistic', 'cyberpunk', 'vintage', 'documentary', 'cinematic', 'satirical']
+    return jsonify({
+        'image_presets': preset_names,
+        'video_presets': preset_names,
+        'preset_descriptions': {
+            'editorial': 'Professional, publication-ready style',
+            'photorealistic': 'Hyper-realistic with deep detail',
+            'cyberpunk': 'Dark, neon-lit dystopian aesthetic',
+            'vintage': 'Film noir and retro aesthetics',
+            'documentary': 'Raw, authentic visual journalism',
+            'cinematic': 'Epic, movie-quality production',
+            'satirical': 'Exaggerated, darkly humorous style'
+        }
+    })
+
 @app.route('/api/health')
 def health_check():
     """Health check endpoint"""
@@ -774,7 +996,8 @@ def health_check():
         'agents': len(agent_states),
         'ai_mode': brand_engine.ai_mode,
         'openai_available': brand_engine.openai_client is not None,
-        'live_mode': brand_engine.ai_mode == 'openai'
+        'live_mode': brand_engine.ai_mode == 'openai',
+        'google_media_available': not media_generator.mock_mode
     })
 
 if __name__ == '__main__':
