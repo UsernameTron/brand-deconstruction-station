@@ -294,11 +294,12 @@ class GoogleMediaGenerator:
                 job.thumbnail_url = result.get("thumbnail_url")
                 job.progress = 100
             else:
-                # Generate real video with Google Veo
+                # Generate real video with Google Veo - pass the existing job
                 result = await self._generate_real_video(
                     job.prompt,
                     job.metadata,
-                    reference_images
+                    reference_images,
+                    existing_job_id=job.job_id  # Use the existing job ID
                 )
 
                 # Veo returns job info (video still processing) or error
@@ -585,7 +586,8 @@ class GoogleMediaGenerator:
         self,
         prompt: str,
         metadata: Dict,
-        reference_images: Optional[List[str]] = None
+        reference_images: Optional[List[str]] = None,
+        existing_job_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Generate a real video using Google Veo API
@@ -653,22 +655,29 @@ class GoogleMediaGenerator:
                         operation_name = operation.get('name')
                         logging.info(f"Video generation started! Operation: {operation_name}")
 
+                        # Use existing job ID if provided, otherwise create new one
+                        job_id = existing_job_id or str(uuid.uuid4())
+
                         # Store operation for polling
-                        job_id = str(uuid.uuid4())
                         self.veo_operations[job_id] = operation_name
+                        logging.info(f"Stored Veo operation for job {job_id}: {operation_name}")
 
-                        # Create job tracking entry
-                        self.active_jobs[job_id] = MediaGenerationJob(
-                            job_id=job_id,
-                            media_type=MediaType.VIDEO,
-                            prompt=prompt,
-                            status=GenerationStatus.PROCESSING,
-                            created_at=datetime.now(),
-                            metadata={"operation_name": operation_name, **metadata},
-                            progress=10  # Operation started
-                        )
+                        # Only create job tracking entry if we created a new job_id
+                        # (if existing_job_id was passed, the job already exists)
+                        if not existing_job_id:
+                            self.active_jobs[job_id] = MediaGenerationJob(
+                                job_id=job_id,
+                                media_type=MediaType.VIDEO,
+                                prompt=prompt,
+                                status=GenerationStatus.PROCESSING,
+                                created_at=datetime.now(),
+                                metadata={"operation_name": operation_name, **metadata},
+                                progress=10  # Operation started
+                            )
+                            logging.info(f"Veo video generation job created: {job_id}")
+                        else:
+                            logging.info(f"Using existing job {job_id} for Veo operation")
 
-                        logging.info(f"Veo video generation job created: {job_id}")
                         logging.info("Video will be available via polling endpoint")
 
                         # Return job info for client-side polling
