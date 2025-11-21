@@ -581,10 +581,18 @@ def analyze_brand():
     thread.daemon = True
     thread.start()
     
+    # Analysis duration constants (in seconds)
+    ANALYSIS_DURATIONS = {
+        'quick': 30,
+        'deep': 180,
+        'mega': 600
+    }
+    DEFAULT_DURATION = 180
+
     return jsonify({
         'analysis_id': analysis_id,
         'status': 'started',
-        'estimated_duration': {'quick': 30, 'deep': 180, 'mega': 600}.get(analysis_type, 180)
+        'estimated_duration': ANALYSIS_DURATIONS.get(analysis_type, DEFAULT_DURATION)
     })
 
 @app.route('/api/agent-status')
@@ -862,7 +870,10 @@ def generate_actual_images():
         logger.error(f"Image generation error: {e}")
         return jsonify({'error': str(e)}), 500
     finally:
-        loop.close()
+        try:
+            loop.close()
+        except Exception:
+            pass  # Loop may already be closed
 
 @app.route('/api/generate-videos', methods=['POST'])
 @limiter.limit("2 per minute")
@@ -874,6 +885,14 @@ def generate_videos():
     duration = data.get('duration', 6)  # 4, 6, or 8 seconds
     aspect_ratio = data.get('aspect_ratio', '16:9')  # 16:9 or 9:16
     resolution = data.get('resolution', '1080p')  # 720p or 1080p
+
+    # Validate video parameters
+    if duration not in [4, 6, 8]:
+        return jsonify({'error': 'Invalid duration. Must be 4, 6, or 8 seconds'}), 400
+    if aspect_ratio not in ['16:9', '9:16']:
+        return jsonify({'error': 'Invalid aspect ratio. Must be "16:9" or "9:16"'}), 400
+    if resolution not in ['720p', '1080p']:
+        return jsonify({'error': 'Invalid resolution. Must be "720p" or "1080p"'}), 400
 
     if not analysis_id or analysis_id not in analysis_results:
         return jsonify({'error': 'Invalid analysis ID'}), 400

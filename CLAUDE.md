@@ -93,6 +93,21 @@ python3 --version
 
 ## Configuration
 
+### Required Environment Variables
+For full functionality, set these environment variables:
+
+#### Brand Deconstruction Station (Required)
+- `OPENAI_API_KEY` - GPT-4o for image concepts (primary requirement)
+- `ANTHROPIC_API_KEY` - Claude integration
+- `GOOGLE_API_KEY` - Google Gemini and media generation
+- `HUGGINGFACE_API_TOKEN` - Hugging Face models
+- `ELEVENLABS_API_KEY` - Voice synthesis
+
+#### Google Cloud (Optional, for Vertex AI)
+- `GOOGLE_CLOUD_PROJECT` - GCP project ID (no default, must be explicit)
+- `GOOGLE_CLOUD_LOCATION` - Region (default: us-central1)
+- `GOOGLE_APPLICATION_CREDENTIALS` - Path to service account JSON
+
 ### Environment Files
 - `tts.env` - TTS application API keys (copy from `tts.env.example`)
 - API keys can also be loaded from `/Users/cpconnor/Desktop/keys.env` (brand station)

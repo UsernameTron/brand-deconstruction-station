@@ -51,7 +51,8 @@ def test_veo_setup():
 async def test_veo_video_generation():
     """Test generating a video with Veo 3.1"""
     try:
-        import google.generativeai as genai
+        from google import genai
+        from google.genai import types
 
         # Configure API
         api_key = os.getenv('GOOGLE_API_KEY') or os.getenv('GEMINI_API_KEY')
@@ -59,88 +60,51 @@ async def test_veo_video_generation():
             logger.error("No API key found")
             return None
 
-        genai.configure(api_key=api_key)
+        client = genai.Client(api_key=api_key)
         logger.info("API configured successfully")
 
         # Test prompt for video generation
-        prompt = """
-        A sleek, futuristic corporate office with holographic displays showing
-        declining stock charts. A robotic executive in a business suit malfunctions,
-        sparks flying from its circuits. Cyberpunk aesthetic with neon blue and red
-        lighting, dramatic camera angle, cinematic quality.
-        """
+        prompt = "A cinematic video shot of a futuristic corporate office with holographic displays. The scene is filmed with wide angle lens, featuring neon lighting. The visual style includes high contrast, teal and orange. High quality, 4k, highly detailed."
 
         logger.info(f"Attempting to generate video with prompt: {prompt[:100]}...")
 
         # Attempt to generate video using the documented approach
         try:
             # Check available models
-            models = genai.list_models()
-            video_models = [m for m in models if 'veo' in m.name.lower() or 'video' in m.name.lower()]
+            models = client.models.list()
+            video_models = [m for m in models if 'veo' in m.name.lower()]
 
             if video_models:
                 logger.info(f"Found video models: {[m.name for m in video_models]}")
             else:
                 logger.warning("No video models found in available models")
 
-            # Try to use the Veo model
-            model = genai.GenerativeModel('models/gemini-1.5-pro-latest')
+            # Use the latest Veo model
+            model_name = "veo-3.1-generate-preview"
+            
+            logger.info(f"Generating video with model: {model_name}")
 
-            # Note: The actual Veo video generation API might not be available yet
-            # This is a test to see what's currently accessible
-            response = model.generate_content(
-                f"Describe how to create this video: {prompt}"
+            # Generate video using SDK
+            operation = client.models.generate_videos(
+                model=model_name,
+                prompt=prompt,
+                config=types.GenerateVideosConfig(
+                    duration_seconds=8,
+                    aspect_ratio="16:9",
+                    resolution="1080p"
+                )
             )
 
-            logger.info(f"Model response: {response.text[:500]}")
-
-            logger.warning("Note: Direct Veo video generation may require special access")
-            logger.info("The API documentation shows Veo is in preview mode")
+            logger.info(f"✅ Video generation started! Operation: {operation.name}")
+            return operation
 
         except Exception as e:
             logger.error(f"Video generation attempt failed: {e}")
+            return None
 
-            # Try alternative approach mentioned in docs
-            logger.info("Attempting alternative approach using REST API...")
-
-            import requests
-            import json
-
-            # Construct REST API request as per documentation
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/veo-3.1-generate-preview:predictLongRunning"
-
-            headers = {
-                "Content-Type": "application/json",
-                "x-goog-api-key": api_key
-            }
-
-            body = {
-                "instances": [
-                    {
-                        "prompt": prompt
-                    }
-                ],
-                "parameters": {}
-            }
-
-            logger.info("Sending request to Veo API...")
-            response = requests.post(url, headers=headers, json=body)
-
-            if response.status_code == 200:
-                operation = response.json()
-                logger.info(f"✅ Video generation started! Operation: {operation.get('name', 'unknown')}")
-                return operation
-            else:
-                logger.error(f"❌ API request failed: {response.status_code}")
-                logger.error(f"Response: {response.text}")
-
-                if response.status_code == 403:
-                    logger.info("Access denied - Veo may require allowlist access or specific permissions")
-                elif response.status_code == 404:
-                    logger.info("Model not found - Veo may not be available in your region/project")
-
+    except ImportError:
+        logger.error("google-genai library not installed. Install with: pip install -U google-genai")
         return None
-
     except Exception as e:
         logger.error(f"Test failed: {e}")
         return None

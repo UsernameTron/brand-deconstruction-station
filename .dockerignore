@@ -1,0 +1,45 @@
+# Git
+.git
+.gitignore
+.dockerignore
+
+# Environment variables (CRITICAL: Do not remove)
+.env
+.env.test
+.env.*
+*.env
+
+# Dependencies
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+
+# Logs
+logs/
+*.log
+
+# Generated content
+static/generated/*
+!static/generated/.gitkeep
+
+# Docker
+Dockerfile
+docker-compose.yml
+docker_push.sh
+
+# Other
+README_NON_TECHNICAL.md
+*.md

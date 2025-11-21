@@ -56,11 +56,11 @@ class StyleModifierEngine:
             atmosphere=["soft haze for depth", "subtle atmospheric texture", "professional quality"]
         ),
         StylePreset.PHOTOREALISTIC: ModifierSet(
-            lens=["50mm natural perspective", "realistic depth of field", "subtle lens falloff"],
-            lighting=["natural lighting", "soft diffused light", "realistic shadows"],
-            composition=["eye level perspective", "natural framing", "environmental context"],
-            color=["Kodak Portra 400 color palette", "warm highlights", "natural color grading"],
-            atmosphere=["natural film grain", "realistic physics", "visible skin pores"]
+            lens=["85mm f/1.4 portrait lens", "50mm prime lens", "macro lens for details", "shallow depth of field"],
+            lighting=["natural soft lighting", "golden hour sun", "rembrandt lighting", "studio softbox", "volumetric lighting"],
+            composition=["rule of thirds", "eye-level perspective", "centered composition", "negative space"],
+            color=["Kodak Portra 400", "Fujifilm Pro 400H", "natural color grading", "accurate skin tones"],
+            atmosphere=["8K UHD", "hyper-realistic", "highly detailed", "skin pores visible", "realistic textures", "ray tracing"]
         ),
         StylePreset.CYBERPUNK: ModifierSet(
             lens=["wide-angle lens", "deep focus", "lens flare from neon"],
@@ -84,11 +84,11 @@ class StyleModifierEngine:
             atmosphere=["documentary authenticity", "no stylization", "raw unpolished"]
         ),
         StylePreset.CINEMATIC: ModifierSet(
-            lens=["anamorphic 2.39:1", "cinematic bokeh", "lens breathing"],
-            lighting=["three-point lighting", "motivated key light", "dramatic backlight"],
-            composition=["widescreen framing", "leading lines", "symmetrical balance"],
-            color=["filmic color grade", "teal and orange", "cinematic density"],
-            atmosphere=["soft god rays", "dust in shafts of light", "cinematic haze"]
+            lens=["anamorphic lens", "35mm film lens", "cinematic bokeh", "wide angle 24mm"],
+            lighting=["dramatic lighting", "rim lighting", "moody lighting", "teal and orange contrast", "god rays"],
+            composition=["widescreen 2.39:1", "cinematic framing", "leading lines", "dynamic angle"],
+            color=["cinematic color grading", "technicolor", "bleach bypass", "high contrast"],
+            atmosphere=["atmospheric fog", "dust particles", "cinematic haze", "movie still", "IMAX quality"]
         ),
         StylePreset.SATIRICAL: ModifierSet(
             lens=["distorted wide angle", "exaggerated perspective", "fish-eye edges"],
@@ -111,13 +111,13 @@ class StyleModifierEngine:
             audio=["room tone", "subtle ambience", "professional foley"]
         ),
         StylePreset.PHOTOREALISTIC: ModifierSet(
-            lens=["50mm natural feel", "1/50 shutter for motion blur", "24fps"],
-            lighting=["natural progression", "realistic time of day", "motivated light sources"],
-            composition=["eye level tracking", "natural movement", "human perspective"],
-            color=["naturalistic grade", "real-world colors", "no stylization"],
-            atmosphere=["environmental particles", "realistic weather", "authentic textures"],
-            movement=["handheld organic feel", "natural camera sway", "realistic speed"],
-            audio=["natural ambient sound", "footsteps", "breathing", "environmental audio"]
+            lens=["50mm prime", "85mm portrait", "sharp focus", "high shutter speed"],
+            lighting=["natural daylight", "soft window light", "realistic shadows", "ambient occlusion"],
+            composition=["eye-level shot", "tracking shot", "steadycam", "natural framing"],
+            color=["natural colors", "no filter", "realistic dynamic range", "10-bit color"],
+            atmosphere=["4k resolution", "highly detailed", "photorealistic textures", "real world physics"],
+            movement=["smooth handheld", "natural walk", "stabilized footage"],
+            audio=["high fidelity ambient", "crisp foley", "natural soundscape"]
         ),
         StylePreset.CYBERPUNK: ModifierSet(
             lens=["wide angle dystopian", "deep focus urban", "anamorphic flares"],
@@ -147,13 +147,13 @@ class StyleModifierEngine:
             audio=["direct sound recording", "ambient reality", "unprocessed audio"]
         ),
         StylePreset.CINEMATIC: ModifierSet(
-            lens=["anamorphic characteristics", "2.39:1 aspect", "cinematic depth"],
-            lighting=["dramatic film lighting", "motivated sources", "cinematic contrast"],
-            composition=["cinematic blocking", "composed frames", "visual storytelling"],
-            color=["professional color grade", "cinematic LUT", "film emulation"],
-            atmosphere=["controlled atmosphere", "production value", "cinematic quality"],
-            movement=["crane shots", "steadicam moves", "dolly tracking", "professional moves"],
-            audio=["cinematic sound design", "layered ambience", "professional mix"]
+            lens=["anamorphic lens", "cinematic depth of field", "rack focus", "lens flares"],
+            lighting=["cinematic lighting", "volumetric light", "dramatic shadows", "practical lights"],
+            composition=["cinematic composition", "wide shot", "over the shoulder", "dutch angle"],
+            color=["movie color grading", "teal and orange", "film grain", "HDR"],
+            atmosphere=["cinematic atmosphere", "mist", "fog", "epic scale", "blockbuster look"],
+            movement=["dolly zoom", "crane shot", "slow motion", "pan", "tilt"],
+            audio=["cinematic score", "sound design", "deep bass", "immersive audio"]
         ),
         StylePreset.SATIRICAL: ModifierSet(
             lens=["distorting wide angle", "unsettling focal lengths", "corporate sterility"],
@@ -177,16 +177,25 @@ class StyleModifierEngine:
 
     # Negative prompts to avoid (what NOT to include)
     NEGATIVE_MODIFIERS = [
-        "no AI look",
-        "no stylization",
-        "no cartoon look",
-        "no floating limbs",
-        "no harsh hotspots",
-        "no oversaturated colors",
-        "avoid green contamination",
-        "no lens dirt",
-        "no flicker",
-        "realistic physics only"
+        "cartoon",
+        "illustration",
+        "painting",
+        "drawing",
+        "sketch",
+        "anime",
+        "3d render",
+        "low resolution",
+        "blur",
+        "pixelated",
+        "artifacts",
+        "bad anatomy",
+        "deformed",
+        "disfigured",
+        "extra limbs",
+        "ugly",
+        "watermark",
+        "text",
+        "signature"
     ]
 
     def __init__(self):
@@ -277,6 +286,7 @@ class StyleModifierEngine:
     ) -> Dict[str, any]:
         """
         Generate a complete Veo-formatted prompt following guidelines
+        Optimized for Veo 3.1 which prefers narrative descriptions
 
         Args:
             subject: Main subject description
@@ -301,15 +311,30 @@ class StyleModifierEngine:
         # Get modifiers for the style
         modifiers = self.VIDEO_MODIFIERS.get(style_preset, self.VIDEO_MODIFIERS[StylePreset.PHOTOREALISTIC])
 
+        # Select random modifiers
+        camera_mods = ", ".join(random.sample(modifiers.lens + modifiers.composition, 3))
+        lighting_mods = ", ".join(random.sample(modifiers.atmosphere + modifiers.lighting, 3))
+        color_mods = ", ".join(random.sample(modifiers.color, 2))
+        
+        # Build narrative prompt for Veo 3.1
+        # Veo 3.1 performs best with a descriptive, natural language prompt
+        narrative_prompt = (
+            f"A cinematic video shot of {subject}. {action}. "
+            f"The scene is filmed with {camera_mods}, featuring {lighting_mods}. "
+            f"The visual style includes {color_mods}. "
+            f"High quality, 4k, highly detailed."
+        )
+
         # Build the Veo prompt structure
         veo_prompt = {
             "shot_number": shot_number,
             "header": f"SHOT {shot_number} - {duration}s, {aspect_ratio}, {resolution}",
             "prompt": {
                 "subject_and_action": f"{subject}, {action}",
-                "camera": ", ".join(random.sample(modifiers.lens + modifiers.composition, 3)),
-                "environment_and_mood": ", ".join(random.sample(modifiers.atmosphere + modifiers.lighting, 3)),
-                "style_grade": ", ".join(random.sample(modifiers.color, 2))
+                "camera": camera_mods,
+                "environment_and_mood": lighting_mods,
+                "style_grade": color_mods,
+                "narrative": narrative_prompt
             },
             "technical_parameters": {
                 "duration": duration,
@@ -320,27 +345,8 @@ class StyleModifierEngine:
                 "reference_images": "No",
                 "frame_control": None
             },
-            "full_text": ""
+            "full_text": narrative_prompt  # Use narrative prompt for the actual generation
         }
-
-        # Compile full text prompt
-        full_prompt = f"""
-{veo_prompt['header']}
-
-PROMPT:
-[Subject and action]: "{veo_prompt['prompt']['subject_and_action']}"
-[Camera]: "{veo_prompt['prompt']['camera']}"
-[Environment and mood]: "{veo_prompt['prompt']['environment_and_mood']}"
-[Style/grade]: "{veo_prompt['prompt']['style_grade']}"
-
-TECHNICAL PARAMETERS:
-- Duration: {veo_prompt['technical_parameters']['duration']} seconds
-- Aspect Ratio: {veo_prompt['technical_parameters']['aspect_ratio']}
-- Resolution: {veo_prompt['technical_parameters']['resolution']}
-- Audio: {veo_prompt['technical_parameters']['audio']}
-- Reference Images: {veo_prompt['technical_parameters']['reference_images']}
-"""
-        veo_prompt["full_text"] = full_prompt.strip()
 
         return veo_prompt
 

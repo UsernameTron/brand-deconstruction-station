@@ -196,10 +196,89 @@ The new SDK properly handles Mirror Vision's sophisticated YAML prompts with:
 
 Previously, these detailed prompts were being simplified or lost by the Vertex AI SDK.
 
-## Commit Hash
+## Additional Fixes Applied
+
+### Issue 3: Duplicate Job IDs (Job Tracking Bug)
+
+**Problem:**
+- Video status endpoint couldn't find jobs despite being created
+- Logs showed two different job IDs for the same video generation request
+
+**Root Cause:**
+- `generate_video()` created a job ID
+- `_generate_real_video()` created ANOTHER job ID
+- Operation was stored with the second ID but polling used the first ID
+
+**Fix Applied:**
+```python
+# Modified _generate_real_video() to accept existing job ID
+async def _generate_real_video(
+    self,
+    prompt: str,
+    metadata: Dict,
+    reference_images: Optional[List[str]] = None,
+    existing_job_id: Optional[str] = None  # NEW
+) -> Dict[str, Any]:
+    # Use existing job ID if provided
+    job_id = existing_job_id or str(uuid.uuid4())
+
+    # Store operation with existing job ID
+    self.veo_operations[job_id] = operation_name
+
+# Updated _process_video_generation() to pass existing job ID
+result = await self._generate_real_video(
+    job.prompt,
+    job.metadata,
+    reference_images,
+    existing_job_id=job.job_id  # Pass the existing job ID
+)
+```
+
+**Result:** ✅ Single job ID used throughout entire flow
+
+### Issue 4: Operation Polling API Call
+
+**Problem:**
+- Multiple errors with `client.operations.get()` API call:
+  1. `Operations.get() got an unexpected keyword argument 'name'`
+  2. `'str' object has no attribute 'name'`
+  3. `Operation() takes no arguments`
+
+**Root Cause:**
+- Incorrect attempts to create Operation object from name string
+- Misunderstanding of how to poll operations using stored operation name
+
+**Fix Applied:**
+```python
+# WRONG attempts:
+# operation = client.operations.get(name=operation_name)  ❌
+# operation = Operation(name=operation_name)  ❌
+
+# CORRECT (official API pattern):
+from google import genai
+
+client = genai.Client(api_key=self.google_api_key)
+
+# Pass operation name string directly
+operation = client.operations.get(operation_name)  ✅
+
+# Check if operation is done
+if operation.done:
+    generated_video = operation.response.generated_videos[0]
+    video_data = client.files.download(file=generated_video.video)
+```
+
+**Result:** ✅ Correct API call pattern implemented per official documentation
+
+## Commit History
 
 ```
 64fcdc3 - fix: replace Vertex AI with google-genai SDK for proper Imagen and Veo integration
+fbaf7f5 - feat: add comprehensive logging for video polling and progress tracking
+94c2c34 - fix: resolve duplicate job ID creation in video generation
+df3ab2b - fix: remove keyword argument from operations.get() call
+736b630 - fix: implement official API pattern for operation polling
+[current] - fix: simplify operation polling to pass name string directly
 ```
 
 ## References

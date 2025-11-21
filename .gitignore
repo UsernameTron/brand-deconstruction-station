@@ -134,3 +134,10 @@ settings.local.py
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+
+# Generated Media
+static/generated/*
+!static/generated/.gitkeep
+
+# Tool Configuration
+.claude/

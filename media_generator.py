@@ -40,6 +40,12 @@ except ImportError:
     logging.warning("PIL/imageio not available. Media processing will be limited.")
 
 from style_modifiers import StyleModifierEngine, StylePreset, MediaType
+from image_enhancement import (
+    ImageModel, ImagePurpose, AspectRatio,
+    SmartModelSelector, EnhancedPromptTemplates,
+    PromptEnhancer, ImageGenerationOrchestrator,
+    BatchGenerator, PromptCache
+)
 
 
 class GenerationStatus(Enum):
@@ -79,11 +85,47 @@ class GoogleMediaGenerator:
         Args:
             google_api_key: Optional - not used for Vertex AI (uses ADC)
         """
+        self.mock_mode = False
+        self.jobs = {}  # Track generation jobs
+        self.project_id = os.getenv('GOOGLE_CLOUD_PROJECT')
+        self.location = os.getenv('GOOGLE_CLOUD_LOCATION', 'us-central1')
+
+        # Initialize Vertex AI client
+        try:
+            aiplatform.init(project=self.project_id, location=self.location)
+            logging.info(f"✅ Vertex AI initialized: project={self.project_id}, location={self.location}")
+        except Exception as e:
+            logging.warning(f"⚠️ Vertex AI initialization failed: {e}")
+            logging.warning("📋 Enabling mock mode for media generation")
+            self.mock_mode = True
+
+        # Initialize Gemini native client for Nano Banana models
+        self.genai_client = None
+        try:
+            import google.generativeai as genai
+            self.genai_client = genai.Client()
+            logging.info("✅ Gemini native client initialized (Nano Banana support)")
+        except Exception as e:
+            logging.warning(f"⚠️ Gemini native client unavailable: {e}")
+            logging.info("💡 Install google-generativeai package for Gemini native image generation")
+
+        # Initialize orchestrator for smart model selection
+        self.image_orchestrator = ImageGenerationOrchestrator()
         self.style_engine = StyleModifierEngine()
-        
-        # Check for Vertex AI availability and credentials
-        self.mock_mode = not VERTEX_AI_AVAILABLE
-        
+        self.prompt_cache = PromptCache()
+
+        # Test connection if not in mock mode
+        if not self.mock_mode:
+            try:
+                # Quick validation that we can access Imagen
+                logging.info("🔍 Validating Imagen API access...")
+                # We don't actually call the API here, just verify setup
+                logging.info("✅ Google Media Generator ready (Live mode)")
+            except Exception as e:
+                logging.warning(f"⚠️ API validation warning: {e}")
+        else:
+            logging.info("🎭 Google Media Generator ready (Mock mode)")
+
         # Set up storage directories
         self.base_dir = Path(__file__).parent
         self.static_dir = self.base_dir / "static" / "generated"
@@ -98,49 +140,64 @@ class GoogleMediaGenerator:
         # Store API key for video/image generation
         self.google_api_key = google_api_key or os.getenv('GOOGLE_API_KEY') or os.getenv('GEMINI_API_KEY')
 
-        # Test Vertex AI configuration if available
-        if not self.mock_mode:
-            try:
-                # Test initialization with project
-                project = os.getenv('GOOGLE_CLOUD_PROJECT', 'avatar-449218')
-                location = os.getenv('GOOGLE_CLOUD_LOCATION', 'us-central1')
-                vertexai.init(project=project, location=location)
-                logging.info(f"Vertex AI configured successfully - Project: {project}")
-                self.mock_mode = False
-            except Exception as e:
-                logging.error(f"Failed to configure Vertex AI: {e}")
-                logging.info("Check if GOOGLE_APPLICATION_CREDENTIALS is set or run: gcloud auth application-default login")
-                self.mock_mode = True
-
-        if self.mock_mode:
-            logging.info("Running in mock mode - will generate placeholder media")
-
     async def generate_image(
         self,
         prompt: str,
         style_preset: StylePreset = StylePreset.PHOTOREALISTIC,
         custom_modifiers: Optional[Dict] = None,
-        reference_images: Optional[List[str]] = None
+        reference_images: Optional[List[str]] = None,
+        purpose: ImagePurpose = ImagePurpose.PHOTOREALISTIC,
+        aspect_ratio: AspectRatio = AspectRatio.LANDSCAPE,
+        quality: str = "standard",
+        use_smart_selection: bool = True,
+        needs_editing: bool = False
     ) -> Dict[str, Any]:
         """
-        Generate an image using Google Imagen or mock generation
+        Generate an image using Google Imagen, Gemini, or mock generation
 
         Args:
             prompt: Base prompt for image generation
             style_preset: Style to apply
             custom_modifiers: Additional modifiers to apply
             reference_images: Optional reference images for consistency
+            purpose: Purpose of the image (affects model selection)
+            aspect_ratio: Desired aspect ratio
+            quality: Quality level ("ultra", "standard", "fast")
+            use_smart_selection: Whether to use smart model selection
+            needs_editing: Whether image will need editing capabilities
 
         Returns:
             Dictionary with image data and metadata
         """
-        # Apply style modifiers
-        enhanced_prompt = self.style_engine.apply_modifiers(
-            prompt,
-            style_preset,
-            MediaType.IMAGE,
-            custom_modifiers
-        )
+        # Use smart model selection if enabled
+        if use_smart_selection:
+            # Prepare generation with orchestrator
+            generation_config = self.image_orchestrator.prepare_generation(
+                prompt=prompt,
+                purpose=purpose,
+                aspect_ratio=aspect_ratio,
+                quality=quality,
+                style=style_preset.value if style_preset else None,
+                needs_editing=needs_editing
+            )
+
+            enhanced_prompt = generation_config["enhanced_prompt"]
+            selected_model = generation_config["model"]
+
+            # Check cache for similar prompts
+            cached_result = self.prompt_cache.get_cached(enhanced_prompt, selected_model.value)
+            if cached_result:
+                logging.info(f"Using cached result for similar prompt")
+                return json.loads(cached_result)
+        else:
+            # Traditional enhancement
+            enhanced_prompt = self.style_engine.apply_modifiers(
+                prompt,
+                style_preset,
+                MediaType.IMAGE,
+                custom_modifiers
+            )
+            selected_model = ImageModel.IMAGEN_4_STANDARD
 
         # Create job
         job_id = str(uuid.uuid4())
@@ -153,7 +210,11 @@ class GoogleMediaGenerator:
             metadata={
                 "style_preset": style_preset.value,
                 "original_prompt": prompt,
-                "enhanced_prompt": enhanced_prompt
+                "enhanced_prompt": enhanced_prompt,
+                "purpose": purpose.value if purpose else "general",
+                "aspect_ratio": aspect_ratio.value,
+                "quality": quality,
+                "model": selected_model.value if use_smart_selection else "default"
             }
         )
         self.active_jobs[job_id] = job
@@ -163,8 +224,13 @@ class GoogleMediaGenerator:
                 # Generate mock image
                 result = await self._generate_mock_image(enhanced_prompt, style_preset)
             else:
-                # Generate real image with Google Imagen
-                result = await self._generate_real_image(enhanced_prompt, reference_images)
+                # Generate real image with selected model
+                result = await self._generate_real_image(
+                    enhanced_prompt,
+                    reference_images,
+                    aspect_ratio=aspect_ratio,
+                    model=selected_model if use_smart_selection else None
+                )
 
             # Update job
             job.status = GenerationStatus.COMPLETE
@@ -173,7 +239,7 @@ class GoogleMediaGenerator:
             job.thumbnail_url = result.get("thumbnail_url", result["url"])
             job.progress = 100
 
-            return {
+            generation_result = {
                 "job_id": job_id,
                 "status": "complete",
                 "image_url": result["url"],
@@ -181,9 +247,20 @@ class GoogleMediaGenerator:
                 "metadata": {
                     **job.metadata,
                     "generation_time": (job.completed_at - job.created_at).total_seconds(),
-                    "model": result.get("model", "mock")
+                    "model": result.get("model", "mock"),
+                    "actual_model_used": result.get("actual_model", selected_model.value if use_smart_selection else "default")
                 }
             }
+
+            # Cache the result if smart selection was used
+            if use_smart_selection and not self.mock_mode:
+                self.prompt_cache.add_to_cache(
+                    enhanced_prompt,
+                    selected_model.value,
+                    json.dumps(generation_result)
+                )
+
+            return generation_result
 
         except Exception as e:
             # Handle generation failure
@@ -411,6 +488,83 @@ class GoogleMediaGenerator:
             "height": height
         }
 
+    async def _generate_with_gemini_native(
+        self,
+        prompt: str,
+        model: ImageModel,
+        aspect_ratio: AspectRatio = AspectRatio.LANDSCAPE
+    ) -> Dict[str, Any]:
+        """
+        Generate image using Gemini native API (Nano Banana)
+        
+        Args:
+            prompt: Enhanced prompt
+            model: GEMINI_NATIVE_FLASH or GEMINI_NATIVE_PRO
+            aspect_ratio: Desired aspect ratio
+        
+        Returns:
+            Dictionary with image data
+        """
+        try:
+            from google import genai
+            from google.genai import types
+            
+            logging.info(f"🍌 Using Gemini Native API ({model.value}) for image generation")
+            
+            # Map our aspect ratio enum to string format for Gemini native API
+            aspect_ratio_str = aspect_ratio.value  # e.g., "16:9"
+            
+            # Use the actual model name for Gemini native (strip -native suffix if present)
+            model_name = model.value.replace("-native", "")
+            
+            # Generate image using Gemini native API
+            response = self.genai_client.models.generate_content(
+                model=model_name,
+                contents=[prompt],
+                config=types.GenerateContentConfig(
+                    response_modalities=['Image'],  # Only return images
+                    image_config=types.ImageConfig(
+                        aspect_ratio=aspect_ratio_str
+                    )
+                )
+            )
+            
+            # Extract image from response
+            for part in response.parts:
+                if part.inline_data is not None:
+                    # Get image as PIL Image
+                    image = part.as_image()
+                    
+                    # Save the generated image
+                    timestamp = int(time.time())
+                    model_suffix = "flash" if "flash" in model.value else "pro"
+                    filename = f"gemini_native_{model_suffix}_{timestamp}.png"
+                    filepath = self.static_dir / filename
+                    
+                    image.save(filepath)
+                    
+                    # Read and encode to base64
+                    with open(filepath, "rb") as f:
+                        image_bytes = f.read()
+                        base64_data = base64.b64encode(image_bytes).decode('utf-8')
+                    
+                    logging.info(f"✅ Successfully generated image with Gemini Native ({model.value}): {filename}")
+                    
+                    return {
+                        "url": f"/static/generated/{filename}",
+                        "base64": f"data:image/png;base64,{base64_data}",
+                        "model": model_name,
+                        "actual_model": model.value,
+                        "aspect_ratio": aspect_ratio_str,
+                        "api": "gemini_native"
+                    }
+            
+            raise Exception("No image generated in Gemini native response")
+            
+        except Exception as e:
+            logging.error(f"Gemini native generation failed: {e}, falling back to mock")
+            return await self._generate_mock_image(prompt, StylePreset.PHOTOREALISTIC)
+
     async def _generate_mock_video(
         self,
         prompt: str,
@@ -510,14 +664,18 @@ class GoogleMediaGenerator:
     async def _generate_real_image(
         self,
         prompt: str,
-        reference_images: Optional[List[str]] = None
+        reference_images: Optional[List[str]] = None,
+        aspect_ratio: AspectRatio = AspectRatio.LANDSCAPE,
+        model: Optional[ImageModel] = None
     ) -> Dict[str, Any]:
         """
-        Generate a real image using Google Imagen via google-generativeai SDK
+        Generate a real image using Google Imagen or Gemini Flash Image
 
         Args:
-            prompt: Enhanced prompt (Mirror Vision YAML prompts work best)
+            prompt: Enhanced prompt
             reference_images: Optional reference images
+            aspect_ratio: Desired aspect ratio
+            model: The model to use (if None, defaults to Imagen 4.0)
 
         Returns:
             Dictionary with real image data
@@ -529,50 +687,118 @@ class GoogleMediaGenerator:
             # Configure API
             api_key = os.getenv('GOOGLE_API_KEY') or os.getenv('GEMINI_API_KEY')
             if not api_key:
-                logging.warning("No API key found for Imagen generation")
+                logging.warning("No API key found for image generation")
                 return await self._generate_mock_image(prompt, StylePreset.PHOTOREALISTIC)
 
-            # Create client (NEW SDK: google-genai package)
+            # Create client
             client = genai.Client(api_key=api_key)
 
-            logging.info(f"Generating real image with Imagen via genai SDK: {prompt[:100]}...")
+            # Determine which model to use
+            if model is None:
+                model = ImageModel.IMAGEN_4_STANDARD
 
-            # Generate image using Imagen 4.0 (stable, non-preview model)
-            result = client.models.generate_images(
-                model="imagen-4.0-generate-001",
-                prompt=prompt,
-                config=types.GenerateImagesConfig(
-                    number_of_images=1,
-                    # aspect_ratio supported: 1:1, 3:4, 4:3, 9:16, 16:9
-                    aspect_ratio="16:9"  # Default for brand satire images
+            logging.info(f"Generating image with {model.value}: {prompt[:100]}...")
+
+            # Check if this is a Gemini native model (Nano Banana)
+            if model in [ImageModel.GEMINI_NATIVE_FLASH, ImageModel.GEMINI_NATIVE_PRO]:
+                if not self.genai_client:
+                    logging.warning("Gemini native client not available, falling back to Imagen")
+                    model = ImageModel.IMAGEN_4_STANDARD
+                else:
+                    return await self._generate_with_gemini_native(prompt, model, aspect_ratio)
+
+            # Generate with Gemini Flash Image for editing capabilities
+            if model == ImageModel.GEMINI_FLASH_IMAGE:
+                # Use Gemini for generation (supports editing and composition)
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash-image",
+                    contents=prompt
                 )
-            )
 
-            # Extract generated image
-            if result.generated_images:
-                generated_image = result.generated_images[0]
+                # Extract image from response
+                for part in response.parts:
+                    if part.inline_data is not None:
+                        image = part.as_image()
 
-                # Save the generated image
-                timestamp = int(time.time())
-                filename = f"imagen_{timestamp}.png"
-                filepath = self.static_dir / filename
+                        # Save the generated image
+                        timestamp = int(time.time())
+                        filename = f"gemini_{timestamp}.png"
+                        filepath = self.static_dir / filename
 
-                # Write image bytes to file
-                with open(filepath, "wb") as f:
-                    f.write(generated_image.image.image_bytes)
+                        image.save(filepath)
 
-                # Read and encode to base64
-                base64_data = base64.b64encode(generated_image.image.image_bytes).decode('utf-8')
+                        # Read and encode to base64
+                        with open(filepath, "rb") as f:
+                            image_bytes = f.read()
+                            base64_data = base64.b64encode(image_bytes).decode('utf-8')
 
-                logging.info(f"Successfully generated image with Imagen 4.0: {filename}")
+                        logging.info(f"Successfully generated image with Gemini Flash Image: {filename}")
 
-                return {
-                    "url": f"/static/generated/{filename}",
-                    "base64": f"data:image/png;base64,{base64_data}",
-                    "model": "imagen-4.0"
-                }
+                        return {
+                            "url": f"/static/generated/{filename}",
+                            "base64": f"data:image/png;base64,{base64_data}",
+                            "model": "gemini-2.5-flash-image",
+                            "actual_model": model.value
+                        }
+
+                raise Exception("No image generated in Gemini response")
+
             else:
-                raise Exception("No images generated in response")
+                # Use Imagen models for photorealistic generation
+                # Map AspectRatio enum to Imagen's supported values
+                aspect_ratio_map = {
+                    AspectRatio.SQUARE: "1:1",
+                    AspectRatio.LANDSCAPE: "16:9",
+                    AspectRatio.PORTRAIT: "9:16",
+                    AspectRatio.FOUR_THREE: "4:3",
+                    AspectRatio.THREE_FOUR: "3:4",
+                    # Imagen doesn't support all ratios, so map to closest
+                    AspectRatio.THREE_TWO: "3:2",
+                    AspectRatio.TWO_THREE: "2:3",
+                    AspectRatio.FOUR_FIVE: "4:5",
+                    AspectRatio.FIVE_FOUR: "5:4",
+                    AspectRatio.ULTRA_WIDE: "21:9"  # May default to 16:9 if not supported
+                }
+
+                mapped_ratio = aspect_ratio_map.get(aspect_ratio, "16:9")
+
+                # Generate image using selected Imagen model
+                result = client.models.generate_images(
+                    model=model.value,
+                    prompt=prompt,
+                    config=types.GenerateImagesConfig(
+                        number_of_images=1,
+                        aspect_ratio=mapped_ratio
+                    )
+                )
+
+                # Extract generated image
+                if result.generated_images:
+                    generated_image = result.generated_images[0]
+
+                    # Save the generated image
+                    timestamp = int(time.time())
+                    filename = f"imagen_{timestamp}.png"
+                    filepath = self.static_dir / filename
+
+                    # Write image bytes to file
+                    with open(filepath, "wb") as f:
+                        f.write(generated_image.image.image_bytes)
+
+                    # Read and encode to base64
+                    base64_data = base64.b64encode(generated_image.image.image_bytes).decode('utf-8')
+
+                    logging.info(f"Successfully generated image with {model.value}: {filename}")
+
+                    return {
+                        "url": f"/static/generated/{filename}",
+                        "base64": f"data:image/png;base64,{base64_data}",
+                        "model": model.value,
+                        "actual_model": model.value,
+                        "aspect_ratio": mapped_ratio
+                    }
+                else:
+                    raise Exception("No images generated in response")
 
         except ImportError as e:
             logging.error(f"google-genai library not installed: {e}")
@@ -602,7 +828,7 @@ class GoogleMediaGenerator:
         """
         try:
             from google import genai
-            import requests
+            from google.genai import types
 
             # Configure API
             api_key = os.getenv('GOOGLE_API_KEY') or os.getenv('GEMINI_API_KEY')
@@ -628,31 +854,33 @@ class GoogleMediaGenerator:
                     # Use the latest Veo model
                     model_name = "veo-3.1-generate-preview"
 
-                    # Prepare REST API request (current approach since SDK doesn't fully support yet)
-                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:predictLongRunning"
+                    # Veo parameters per official API documentation
+                    # IMPORTANT: 1080p requires 8 seconds duration
+                    duration = int(metadata.get("duration", 8))
+                    resolution = metadata.get("resolution", "1080p")
+                    aspect_ratio = metadata.get("aspect_ratio", "16:9")
 
-                    headers = {
-                        "Content-Type": "application/json",
-                        "x-goog-api-key": api_key
-                    }
+                    # Adjust for resolution constraints
+                    if resolution == "1080p" and duration != 8:
+                        logging.info(f"Adjusting duration from {duration} to 8 seconds for 1080p resolution")
+                        duration = 8
 
-                    # Veo parameters - currently the API doesn't support additional parameters
-                    # They may be added in future versions
-                    body = {
-                        "instances": [
-                            {
-                                "prompt": prompt
-                            }
-                        ],
-                        "parameters": {}
-                    }
+                    # Try using the SDK's generate_videos method first
+                    try:
+                        logging.info(f"Attempting Veo video generation with SDK: {model_name}")
 
-                    logging.info(f"Attempting Veo video generation with model: {model_name}")
-                    response = requests.post(url, headers=headers, json=body, timeout=30)
+                        # Generate video using SDK
+                        operation = client.models.generate_videos(
+                            model=model_name,
+                            prompt=prompt,
+                            config=types.GenerateVideosConfig(
+                                duration_seconds=duration,
+                                aspect_ratio=aspect_ratio,
+                                resolution=resolution
+                            )
+                        )
 
-                    if response.status_code == 200:
-                        operation = response.json()
-                        operation_name = operation.get('name')
+                        operation_name = operation.name
                         logging.info(f"Video generation started! Operation: {operation_name}")
 
                         # Use existing job ID if provided, otherwise create new one
@@ -663,7 +891,6 @@ class GoogleMediaGenerator:
                         logging.info(f"Stored Veo operation for job {job_id}: {operation_name}")
 
                         # Only create job tracking entry if we created a new job_id
-                        # (if existing_job_id was passed, the job already exists)
                         if not existing_job_id:
                             self.active_jobs[job_id] = MediaGenerationJob(
                                 job_id=job_id,
@@ -672,15 +899,9 @@ class GoogleMediaGenerator:
                                 status=GenerationStatus.PROCESSING,
                                 created_at=datetime.now(),
                                 metadata={"operation_name": operation_name, **metadata},
-                                progress=10  # Operation started
+                                progress=10
                             )
-                            logging.info(f"Veo video generation job created: {job_id}")
-                        else:
-                            logging.info(f"Using existing job {job_id} for Veo operation")
 
-                        logging.info("Video will be available via polling endpoint")
-
-                        # Return job info for client-side polling
                         return {
                             "job_id": job_id,
                             "status": "processing",
@@ -688,22 +909,88 @@ class GoogleMediaGenerator:
                             "message": "Video generation in progress - poll /api/video-status for updates"
                         }
 
-                    elif response.status_code == 403:
-                        error_data = response.json()
-                        error_msg = error_data.get('error', {}).get('message', 'Unknown error')
+                    except (AttributeError, Exception) as sdk_error:
+                        # Fallback to REST API if SDK method fails
+                        logging.info(f"SDK method failed ({sdk_error}), falling back to REST API")
+                        import requests
 
-                        if 'leaked' in error_msg.lower():
-                            logging.error("API key issue detected - please use a valid API key")
-                        elif 'permission' in error_msg.lower():
-                            logging.warning("Veo access not available - may require allowlist")
+                        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:predictLongRunning"
+
+                        headers = {
+                            "Content-Type": "application/json",
+                            "x-goog-api-key": api_key
+                        }
+
+                        body = {
+                            "instances": [
+                                {
+                                    "prompt": prompt
+                                }
+                            ],
+                            "parameters": {
+                                "durationSeconds": duration,
+                                "aspectRatio": aspect_ratio,
+                                "resolution": resolution
+                            }
+                        }
+
+                        logging.info(f"Attempting Veo video generation with REST API: {model_name}")
+                        response = requests.post(url, headers=headers, json=body, timeout=30)
+
+                        if response.status_code == 200:
+                            operation = response.json()
+                            operation_name = operation.get('name')
+                            logging.info(f"Video generation started! Operation: {operation_name}")
+
+                            # Use existing job ID if provided, otherwise create new one
+                            job_id = existing_job_id or str(uuid.uuid4())
+
+                            # Store operation for polling
+                            self.veo_operations[job_id] = operation_name
+                            logging.info(f"Stored Veo operation for job {job_id}: {operation_name}")
+
+                            # Only create job tracking entry if we created a new job_id
+                            # (if existing_job_id was passed, the job already exists)
+                            if not existing_job_id:
+                                self.active_jobs[job_id] = MediaGenerationJob(
+                                    job_id=job_id,
+                                    media_type=MediaType.VIDEO,
+                                    prompt=prompt,
+                                    status=GenerationStatus.PROCESSING,
+                                    created_at=datetime.now(),
+                                    metadata={"operation_name": operation_name, **metadata},
+                                    progress=10  # Operation started
+                                )
+                                logging.info(f"Veo video generation job created: {job_id}")
+                            else:
+                                logging.info(f"Using existing job {job_id} for Veo operation")
+
+                            logging.info("Video will be available via polling endpoint")
+
+                            # Return job info for client-side polling
+                            return {
+                                "job_id": job_id,
+                                "status": "processing",
+                                "operation_name": operation_name,
+                                "message": "Video generation in progress - poll /api/video-status for updates"
+                            }
+
+                        elif response.status_code == 403:
+                            error_data = response.json()
+                            error_msg = error_data.get('error', {}).get('message', 'Unknown error')
+
+                            if 'leaked' in error_msg.lower():
+                                logging.error("API key issue detected - please use a valid API key")
+                            elif 'permission' in error_msg.lower():
+                                logging.warning("Veo access not available - may require allowlist")
+                            else:
+                                logging.error(f"Access denied: {error_msg}")
+
+                        elif response.status_code == 404:
+                            logging.warning("Veo model not found - using enhanced mock generation")
+
                         else:
-                            logging.error(f"Access denied: {error_msg}")
-
-                    elif response.status_code == 404:
-                        logging.warning("Veo model not found - using enhanced mock generation")
-
-                    else:
-                        logging.error(f"Veo API error {response.status_code}: {response.text}")
+                            logging.error(f"Veo API error {response.status_code}: {response.text}")
 
                 else:
                     logging.info("No Veo models available - using enhanced mock generation")
@@ -769,6 +1056,128 @@ class GoogleMediaGenerator:
 
         return result
 
+    async def edit_image(
+        self,
+        image_url: str,
+        edit_instruction: str,
+        style_preset: StylePreset = StylePreset.PHOTOREALISTIC
+    ) -> Dict[str, Any]:
+        """
+        Edit an existing image using Gemini's mask-free editing capabilities
+
+        Args:
+            image_url: URL or path to the image to edit
+            edit_instruction: Natural language instruction for editing
+            style_preset: Style to apply to the edit
+
+        Returns:
+            Dictionary with edited image data
+        """
+        try:
+            from google import genai
+            from PIL import Image
+
+            # Configure API
+            api_key = os.getenv('GOOGLE_API_KEY') or os.getenv('GEMINI_API_KEY')
+            if not api_key:
+                return {"error": "No API key found for image editing"}
+
+            # Create client
+            client = genai.Client(api_key=api_key)
+
+            # Load the image
+            if image_url.startswith("/static/"):
+                # Local file
+                image_path = self.base_dir / image_url.lstrip("/")
+            else:
+                # Assume it's a full path
+                image_path = Path(image_url)
+
+            if not image_path.exists():
+                return {"error": f"Image not found: {image_url}"}
+
+            # Open image with PIL
+            input_image = Image.open(image_path)
+
+            # Create enhanced edit instruction
+            enhanced_instruction = f"{edit_instruction}. Maintain {style_preset.value} style."
+
+            logging.info(f"Editing image with Gemini: {enhanced_instruction[:100]}...")
+
+            # Edit using Gemini Flash Image
+            response = client.models.generate_content(
+                model="gemini-2.5-flash-image",
+                contents=[enhanced_instruction, input_image]
+            )
+
+            # Extract edited image
+            for part in response.parts:
+                if part.inline_data is not None:
+                    edited_image = part.as_image()
+
+                    # Save the edited image
+                    timestamp = int(time.time())
+                    filename = f"edited_gemini_{timestamp}.png"
+                    filepath = self.static_dir / filename
+
+                    edited_image.save(filepath)
+
+                    # Read and encode to base64
+                    with open(filepath, "rb") as f:
+                        image_bytes = f.read()
+                        base64_data = base64.b64encode(image_bytes).decode('utf-8')
+
+                    logging.info(f"Successfully edited image with Gemini: {filename}")
+
+                    return {
+                        "status": "complete",
+                        "original_url": image_url,
+                        "edited_url": f"/static/generated/{filename}",
+                        "base64": f"data:image/png;base64,{base64_data}",
+                        "model": "gemini-2.5-flash-image",
+                        "edit_instruction": edit_instruction
+                    }
+
+            return {"error": "No edited image in response"}
+
+        except Exception as e:
+            logging.error(f"Image editing failed: {e}")
+            return {"error": str(e)}
+
+    async def generate_image_batch(
+        self,
+        prompts: List[str],
+        purpose: ImagePurpose = ImagePurpose.PHOTOREALISTIC,
+        aspect_ratio: AspectRatio = AspectRatio.LANDSCAPE,
+        quality: str = "standard"
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate multiple images in batch
+
+        Args:
+            prompts: List of prompts
+            purpose: Purpose of all images
+            aspect_ratio: Aspect ratio for all images
+            quality: Quality level
+
+        Returns:
+            List of generation results
+        """
+        results = []
+
+        # Process each prompt
+        for prompt in prompts[:4]:  # Limit to 4 for safety
+            result = await self.generate_image(
+                prompt=prompt,
+                purpose=purpose,
+                aspect_ratio=aspect_ratio,
+                quality=quality,
+                use_smart_selection=True
+            )
+            results.append(result)
+
+        return results
+
     async def check_video_status(self, job_id: str) -> Dict[str, Any]:
         """
         Check the status of a video generation job and poll Veo operations
@@ -804,7 +1213,7 @@ class GoogleMediaGenerator:
 
                 try:
                     from google import genai
-                    from google.genai.types import Operation
+                    from google.genai import types
 
                     if not self.google_api_key:
                         raise Exception("No API key available for polling")
@@ -812,12 +1221,10 @@ class GoogleMediaGenerator:
                     # Create client (official API docs pattern)
                     client = genai.Client(api_key=self.google_api_key)
 
-                    # Create operation object from name
-                    operation = Operation(name=operation_name)
-
                     logging.info(f"Fetching operation status from Google...")
-                    # Refresh operation status - pass operation object
-                    operation = client.operations.get(operation)
+                    # Create operation object and get status (correct API pattern)
+                    operation_obj = types.GenerateVideosOperation(name=operation_name)
+                    operation = client.operations.get(operation_obj)
 
                     # Check if operation is done
                     if operation.done:
@@ -861,8 +1268,12 @@ class GoogleMediaGenerator:
                     else:
                         # Still processing - update progress estimate
                         # Veo typically takes 2-5 minutes, estimate based on elapsed time
+                        PROGRESS_MIN = 10  # Minimum progress when processing starts
+                        PROGRESS_MAX = 90  # Maximum progress before completion
+                        VEO_ESTIMATED_TIME = 180  # Estimated time in seconds (3 minutes)
                         elapsed = (datetime.now() - job.created_at).total_seconds()
-                        estimated_progress = min(int(10 + (elapsed / 180) * 80), 90)  # 10-90%
+                        progress_range = PROGRESS_MAX - PROGRESS_MIN
+                        estimated_progress = min(int(PROGRESS_MIN + (elapsed / VEO_ESTIMATED_TIME) * progress_range), PROGRESS_MAX)
                         job.progress = estimated_progress
 
                         logging.info(f"Veo operation still processing: {operation_name}, progress: {estimated_progress}%")

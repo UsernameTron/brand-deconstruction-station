@@ -1,5 +1,8 @@
 FROM python:3.9-slim
 
+# Create a non-root user
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
 WORKDIR /app
 
 # Copy requirements first for better caching
@@ -15,6 +18,12 @@ ENV FLASK_APP=app.py
 
 # Fix port to 3000 (instead of 3002)
 RUN sed -i 's/port=3002/port=3000/g' app.py
+
+# Change ownership of the application directory to the non-root user
+RUN chown -R appuser:appuser /app
+
+# Switch to non-root user
+USER appuser
 
 # Expose the port
 EXPOSE 3000

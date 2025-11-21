@@ -31,7 +31,9 @@ transformers==4.35.2
 torch==2.1.2
 
 # Google Cloud Storage (for potential media uploads)
-google-cloud-storage==2.10.0
+google-cloud-aiplatform>=1.56.0
+google-genai>=0.8.0
+pillow>=10.0.0
 
 # Async support for media generation
 aiohttp==3.9.1

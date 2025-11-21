@@ -23,7 +23,7 @@ The Brand Deconstruction Station has been prepared for Google Veo video generati
 
 1. **API Key Status** - Current API key flagged as "leaked" by Google
 2. **Access Requirements** - Veo may require allowlist access (currently in preview)
-3. **Polling Not Implemented** - Long-running operation polling pending implementation
+3. **Polling Implemented** - Long-running operation polling is fully functional
 
 ## API Requirements
 
@@ -71,13 +71,13 @@ export GEMINI_API_KEY=your-api-key-here
    # REST API endpoint
    url = "https://generativelanguage.googleapis.com/v1beta/models/veo-3.1-generate-preview:predictLongRunning"
 
-   # Parameters
+   # Parameters (now properly implemented)
    {
        "instances": [{"prompt": "video description"}],
        "parameters": {
-           "duration": 8,          # 4, 6, or 8 seconds
-           "aspectRatio": "16:9",  # or "9:16"
-           "resolution": "720p"    # or "1080p"
+           "duration": 8,          # 4, 6, or 8 seconds (required)
+           "aspectRatio": "16:9",  # or "9:16" (required)
+           "resolution": "1080p"   # or "720p" (required)
        }
    }
    ```
@@ -132,24 +132,23 @@ Found video models: ['models/veo-3.1-generate-preview', ...]
 
 ## Future Enhancements
 
-### Pending Implementation
+### Already Implemented
 
-1. **Operation Polling**:
+1. **Operation Polling** (Fully functional in `media_generator.py:check_video_status`):
    ```python
-   # Poll for video completion
-   while not operation.done:
-       time.sleep(10)
-       operation = client.operations.get(operation)
+   # Polls for video completion with proper Google API pattern
+   operation = client.operations.get(operation_name)
+   if operation.done:
+       # Extract and download video
+       video_data = client.files.download(file=generated_video.video)
    ```
 
-2. **Video Download**:
-   ```python
-   # Download completed video
-   video = operation.response.generated_videos[0]
-   client.files.download(file=video.video)
-   ```
+2. **Video Download** (Implemented and working):
+   - Automatic download when operation completes
+   - Saves to `/static/generated/` directory
+   - Returns URL for client access
 
-3. **Advanced Features**:
+3. **Advanced Features** (Pending):
    - Reference image support
    - Video extension capabilities
    - Custom aspect ratios and resolutions
