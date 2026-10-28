@@ -9,7 +9,7 @@ pytest-playwright==0.4.3
 locust==2.20.0
 
 # Code Quality
-black==23.12.1
+black==26.10.1
 flake8==7.0.0
 pylint==3.0.3
 isort==5.13.2
